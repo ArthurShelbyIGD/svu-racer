@@ -1604,7 +1604,17 @@ export function buildCockpit(o = {}) {
     // never disagree about where the red zone is. In raw engine revs that is
     // 0.778, a shade before main.js's limiter at 0.80: a shift light that
     // warns is worth more than one that reports.
-    const shift = rev >= 0.80 ? 1 : 0;
+    //
+    // AND ONLY WHEN THERE IS SOMEWHERE TO SHIFT TO. In top gear at full
+    // throttle the car sits near its limiter by definition — that is where the
+    // engine and the drag balance — so this lit on every straight and stayed
+    // lit, which Anthony reported as "flat out, fully boosted, way over 240mph,
+    // centre of the road and the light is red". A tell-tale that is on whenever
+    // you are going quickly is not telling you anything. The brief I wrote for
+    // this said "light it when the revs enter the red" and never said the rest;
+    // the code did exactly what it was asked.
+    const gears = s.gears || 5;
+    const shift = (rev >= 0.80 && gear < gears - 1) ? 1 : 0;
     if (shift !== lampL) { lampL = shift; paintQuad(Q_LAMP_L, shift ? LAMP_SHIFT : LAMP_OFF); }
 
     const st = s.braking ? 2 : s.boosting ? 1 : 0;

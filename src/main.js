@@ -2071,7 +2071,7 @@ const cockpit = buildCockpit({ pencil: PENCIL, palette: PAL, ink: INK, driverX: 
 
 /** Filled in and handed to the cockpit each frame; never reallocated. */
 const COCKPIT_STATE = { speed: 0, maxSpeed: 0, steer: 0, boosting: false, braking: false,
-                        rev: 0, gear: 0 };
+                        rev: 0, gear: 0, gears: GEARS.length };
 
 const car = new Group();
 car.add(bodyKit.group);
@@ -2901,6 +2901,10 @@ function frame(now) {
     COCKPIT_STATE.braking = braking;
     COCKPIT_STATE.rev = st.rev;
     COCKPIT_STATE.gear = st.gear;
+    // Passed rather than assumed, because the garage will sell engines with
+    // different boxes and a cockpit that hardcodes five would quietly stop
+    // telling the truth the day the first six-speed is bought.
+    COCKPIT_STATE.gears = GEARS.length;
     cockpit.update(COCKPIT_STATE);
   } else {
     cockpit.update(null);
@@ -3049,5 +3053,6 @@ window.RACER = {
   },
   // Exposed so the checks assert against the real constants rather than
   // against numbers copied into a test file, which then drift apart.
-  consts: { ROAD_W, STEER_RATE, BRAKE_GRIP, CORNER_AUTHORITY, SPEED_STEPS, SEG_LEN, STRAY_MAX },
+  consts: { ROAD_W, STEER_RATE, BRAKE_GRIP, CORNER_AUTHORITY, SPEED_STEPS, SEG_LEN, STRAY_MAX,
+            GEARS, REDLINE, MPH },
 };

@@ -33,6 +33,7 @@ import {
 import { inkGroup, buildOutline, inkMaterial, pencilTexture, INK } from './art/toon.js';
 import { buildBody } from './car/body.js';
 import { buildFurniture } from './world/furniture.js';
+import { buildGantry } from './world/gantry.js';
 import { buildCockpit } from './car/cockpit.js';
 
 // ---------------------------------------------------------------- constants
@@ -2042,12 +2043,141 @@ const SCENERY_MAX = SEG_COUNT * ROWS_MAX * PER_SEG_MAX;   // 7,040
  * for a measurement — this is where it BEGINS, not where it stops.
  */
 const SCENERY_START = 3500;
+
+/**
+ * ---- THE RACE ------------------------------------------------------------
+ *
+ * A DISTANCE, NOT A LAP. The track loops and one full circuit is 24,000 units,
+ * which is 1:54 flat out and nearer three minutes driven properly — a long
+ * first race for someone who has just scanned a QR code. Anthony's call: a
+ * tunable distance defaulting to about a minute, settled from what testers
+ * report rather than from what either of us guesses.
+ *
+ * 12,000 units is half the circuit. From a standstill that is roughly a minute:
+ * about twelve seconds and 1,500 units getting up to speed, then the rest at
+ * around 205. tools/racetime.mjs measures it rather than trusting that sum.
+ *
+ * The start line sits at RACE_FROM. Everything else — the finish gantry, the
+ * timing, the banner placement — is derived, so moving the race is one number.
+ */
+const RACE_FROM = 600;          // where the start gantry stands, in world units
+const RACE_LEN = 12000;         // and how far it is to the finish
+const COUNTDOWN = 3.2;          // seconds of lights before the throttle is live
+/**
+ * HOW FAR BEHIND THE ARCH THE CAR SITS ON THE GRID.
+ *
+ * Zero was the obvious value and it hid the branding completely: startRace()
+ * put the car exactly at RACE_FROM, which is where the arch stands, so the sign
+ * was directly overhead and the legs were behind the A-pillars. The countdown,
+ * the launch and the first second of every race had an empty street in shot —
+ * found by the agent who built the gantry photographing its own work on the
+ * grid rather than only on the approach.
+ *
+ * Forty-five units puts the arch a second ahead at the lights: you can read it
+ * while you wait, and you go under it as the car comes on song. The finish line
+ * stays where it was, so a race is this much longer than RACE_LEN and the two
+ * arches still sit exactly where the gantry places them.
+ */
+const GRID_BACK = 45;
+
+/**
+ * WHAT STATE THE RACE IS IN. Four, and the cockpit draws from these rather than
+ * inferring anything from the speed:
+ *
+ *   'grid'      on the line, held, engine running, countdown not started
+ *   'countdown' lights running, throttle dead, car cannot move
+ *   'racing'    timing
+ *   'done'      crossed the line; the result is up until the next start
+ */
+const race = {
+  state: 'grid',
+  t: 0,              // seconds elapsed in the current state
+  elapsed: 0,        // seconds of racing so far, or the final time when done
+  topSpeed: 0,       // best speed reached this run, world units
+  best: null,        // best elapsed ever, seconds, or null
+  bestTop: null,     // best top speed ever, world units, or null
+  fresh: false,      // did the run just set a personal best
+  from: RACE_FROM, len: RACE_LEN, countdown: COUNTDOWN,
+};
+
+/**
+ * PERSONAL BESTS SURVIVE THE TAB CLOSING. localStorage, wrapped in try/catch
+ * because a browser in private mode throws on access rather than returning
+ * null, and a thrown storage error during boot would take the whole game down
+ * for the sake of a lap time.
+ */
+const BEST_KEY = 'svu-racer-best-v1';
+function loadBests() {
+  try {
+    const raw = localStorage.getItem(BEST_KEY);
+    if (!raw) return;
+    const v = JSON.parse(raw);
+    if (typeof v.best === 'number') race.best = v.best;
+    if (typeof v.bestTop === 'number') race.bestTop = v.bestTop;
+  } catch (e) { /* no storage, no bests, no crash */ }
+}
+function saveBests() {
+  try {
+    localStorage.setItem(BEST_KEY, JSON.stringify({ best: race.best, bestTop: race.bestTop,
+                                                    len: RACE_LEN, build: (window.__DEVICE || {}).build }));
+  } catch (e) { /* nothing to do about it and nothing to say */ }
+}
+loadBests();
+
+/** Put the car on the line, stopped, in first, and start the lights. */
+function startRace() {
+  race.state = 'countdown';
+  race.t = 0; race.elapsed = 0; race.topSpeed = 0; race.fresh = false;
+  st.dist = RACE_FROM - GRID_BACK; st.speed = 0; st.gear = 0; st.x = 0; st.steer = 0;
+  pedal.brake = false; pedal.boost = false;
+}
+
+/**
+ * Advance the race. Called once per frame BEFORE the throttle, because during
+ * the countdown the throttle must not run at all — holding the car with a brake
+ * would still let the engine pull against it and would make the launch depend
+ * on how the two happened to balance.
+ */
+function stepRace(dt) {
+  race.t += dt;
+  if (race.state === 'countdown') {
+    if (race.t >= COUNTDOWN) { race.state = 'racing'; race.t = 0; }
+    return;
+  }
+  if (race.state === 'racing') {
+    race.elapsed += dt;
+    if (st.speed > race.topSpeed) race.topSpeed = st.speed;
+    if (st.dist >= RACE_FROM + RACE_LEN) {
+      race.state = 'done'; race.t = 0;
+      // A personal best is either of them. Beating your time is the point;
+      // beating your top speed is the thing the boost is for.
+      let got = false;
+      if (race.best === null || race.elapsed < race.best) { race.best = race.elapsed; got = true; }
+      if (race.bestTop === null || race.topSpeed > race.bestTop) { race.bestTop = race.topSpeed; got = true; }
+      race.fresh = got;
+      if (got) saveBests();
+    }
+    return;
+  }
+  if (race.state === 'done' && race.t > 6) startRace();
+}
+
 const scenery = new Scenery(scene, SCENERY_MAX);
 scenery.count = SCENERY_START;
 // Street furniture: lampposts, signals, crossings, railings. A stub until it
 // is built, so the game runs identically until it draws its first triangle.
 const furniture = buildFurniture({
   scene, palette: PAL, ink: INK, roadW: ROAD_W, segLen: SEG_LEN, segCount: SEG_COUNT,
+});
+// The start and finish gantries, with the SVU branding. ONE set of geometry
+// serving both lines — they are RACE_LEN apart and the road is 1,350 units
+// deep, so they can never both be on screen; gantry.js checks that claim every
+// frame rather than trusting this comment. `behind` is passed because anything
+// sitting ON the road has to reproduce Road.update's walk exactly, and
+// furniture.js's note explains what it costs not to.
+const gantry = buildGantry({
+  scene, roadW: ROAD_W, segLen: SEG_LEN, segCount: SEG_COUNT, behind: BEHIND,
+  from: RACE_FROM, len: RACE_LEN,
 });
 // One texture for the whole game. Generated at startup from a few hundred
 // bytes of canvas drawing, never downloaded.
@@ -2071,7 +2201,7 @@ const cockpit = buildCockpit({ pencil: PENCIL, palette: PAL, ink: INK, driverX: 
 
 /** Filled in and handed to the cockpit each frame; never reallocated. */
 const COCKPIT_STATE = { speed: 0, maxSpeed: 0, steer: 0, boosting: false, braking: false,
-                        rev: 0, gear: 0, gears: GEARS.length };
+                        rev: 0, gear: 0, gears: GEARS.length, race: null };
 
 const car = new Group();
 car.add(bodyKit.group);
@@ -2395,6 +2525,11 @@ function firstGesture() {
   if (!askedTilt) { askedTilt = true; askTilt(); }
   keepAwake();
   goFullscreen();
+  // The first touch also drops the lights. Before that the car sits on the
+  // grid with the engine running, which is a better first frame than a car
+  // already doing 60 down a road the player has not looked at yet.
+  if (race.state === 'grid') startRace();
+  else if (race.state === 'done') startRace();
 }
 document.addEventListener('touchstart', firstGesture, { capture: true, passive: true });
 document.addEventListener('mousedown', firstGesture, { capture: true, passive: true });
@@ -2629,6 +2764,10 @@ function frame(now) {
   st.simT += dt;
   simmed++;
 
+  // --- the race, before anything can move ---
+  stepRace(dt);
+  const held = race.state === 'countdown' || race.state === 'grid';
+
   // --- drive ---
   const kL = keys.ArrowLeft || keys.KeyA ? -1 : 0;
   const kR = keys.ArrowRight || keys.KeyD ? 1 : 0;
@@ -2647,7 +2786,13 @@ function frame(now) {
   // Revs are speed against what THIS gear can pull, which is what makes the
   // needle drop when you shift: the speed does not change, the divisor does.
   st.rev = gearTop > 0 ? clamp(st.speed / gearTop, 0, 1) : 0;
-  if (tune.freeze) {
+  if (held) {
+    // ON THE LINE THE THROTTLE IS DEAD, not fought. Holding the car with a
+    // brake instead would let the engine pull against it, and the launch would
+    // then depend on however those two happened to balance on the frame the
+    // lights went out.
+    st.speed = 0;
+  } else if (tune.freeze) {
     // Speed held exactly where the harness put it. Without this the car keeps
     // accelerating between two "identical" captures, the field of view opens
     // with it, and every pixel in the frame moves — which is what the noise
@@ -2833,6 +2978,7 @@ function frame(now) {
   const t3 = performance.now();
   furniture.update(track, base, frac, st.x, baseY);
   PROF.furniture += performance.now() - t3;
+  gantry.update(track, base, frac, st.x, baseY);
   PROF.n++;   // smoothed, not spiky
 
   // --- car pose ---
@@ -2905,6 +3051,7 @@ function frame(now) {
     // different boxes and a cockpit that hardcodes five would quietly stop
     // telling the truth the day the first six-speed is bought.
     COCKPIT_STATE.gears = GEARS.length;
+    COCKPIT_STATE.race = race;
     cockpit.update(COCKPIT_STATE);
   } else {
     cockpit.update(null);
@@ -2992,6 +3139,11 @@ function frame(now) {
     statsEl.textContent =
       `  ${Math.round(st.speed * MPH)} mph  of ${Math.round(top * MPH)}` +
         `${boosting ? '  BOOST' : braking ? '  BRAKE' : ''}\n` +
+      `race        ${race.state}  ${race.state === 'countdown'
+          ? (COUNTDOWN - race.t).toFixed(1) : race.elapsed.toFixed(2)}s` +
+        `  ${Math.max(0, RACE_FROM + RACE_LEN - st.dist).toFixed(0)} to go` +
+        `${race.best !== null ? `   best ${race.best.toFixed(2)}s` : ''}` +
+        `${race.bestTop !== null ? ` / ${Math.round(race.bestTop * MPH)}mph` : ''}\n` +
       `gear        ${st.gear + 1}/${GEARS.length}  revs ${(100 * st.rev).toFixed(0)}%` +
         `${st.rev >= REDLINE ? ' RED' : ''}  tops at ` +
         `${Math.round(top * GEARS[st.gear] * MPH)}\n` +
@@ -3042,7 +3194,7 @@ requestAnimationFrame(frame);
 // Exposed so a harness can read the same numbers the player sees.
 window.RACER = {
   st, renderer, scene, camera, median, handling, tune, tilt, pedal, wake, fs, track,
-  bodyKit, cockpit, scenery, furniture, PROF,
+  bodyKit, cockpit, scenery, furniture, gantry, PROF,
   // The pacing, so a harness can prove the cap draws what it claims rather
   // than trusting the readout that the cap itself writes.
   pace: {
@@ -3053,6 +3205,7 @@ window.RACER = {
   },
   // Exposed so the checks assert against the real constants rather than
   // against numbers copied into a test file, which then drift apart.
+  race, startRace,
   consts: { ROAD_W, STEER_RATE, BRAKE_GRIP, CORNER_AUTHORITY, SPEED_STEPS, SEG_LEN, STRAY_MAX,
-            GEARS, REDLINE, MPH },
+            GEARS, REDLINE, MPH, RACE_FROM, RACE_LEN, COUNTDOWN },
 };

@@ -1,6 +1,11 @@
 # Build output is COMMITTED in this repo, deliberately — GitHub Pages serves
 # docs/ and there is no build step on GitHub's side, so docs/index.html is the
 # published game rather than an artifact to be regenerated.
+# BOTH FORMS. `node_modules/` with the slash matches a directory and does NOT
+# match a SYMLINK called node_modules — which is how a worktree gets its
+# dependencies here, and how a symlink to another checkout's node_modules ended
+# up committed as a file.
 node_modules/
+node_modules
 shots/
 *.tgz

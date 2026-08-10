@@ -46,6 +46,31 @@ await page.waitForTimeout(1500);
 // nothing here should pay for it.
 await page.evaluate(() => { if (window.RACER) window.RACER.renderer.setPixelRatio(0.6); });
 
+// AND LET THE CAR OFF THE LINE, FOR THE WHOLE SUITE.
+//
+// The race state machine pins the speed to zero in 'grid' and in 'countdown',
+// and every test below drives st directly without ever touching a control — so
+// from the day the lights were added the autopilot covered 0 of its 9,000
+// units and reported the track as undriveable, and four more tests failed
+// behind it. Nothing here was measuring the track any more; it was measuring
+// the start lights.
+//
+// A PIN RATHER THAN ONE ASSIGNMENT. Setting the state once is not enough: the
+// physics tests below drive far enough to cross the finish line, at which
+// point the race goes to 'done', restarts itself six seconds later and pins
+// the car again in the middle of whatever is being measured. This holds it in
+// 'racing' for the duration of the suite. No test here asserts anything about
+// the race, so nothing is being hidden by it — the race's own states are
+// photographed and measured by tools/racedash.mjs.
+await page.evaluate(() => {
+  const R = window.RACER;
+  const hold = () => {
+    if (R.race.state !== 'racing') { R.race.state = 'racing'; R.race.t = 0; }
+    requestAnimationFrame(hold);
+  };
+  requestAnimationFrame(hold);
+});
+
 // ---- 1. does it boot at all -------------------------------------------------
 const booted = await page.evaluate(() => !!window.RACER);
 ok(booted, 'boots and exposes RACER');
@@ -125,11 +150,28 @@ console.log(`       (elevation runs ${prof.lo.toFixed(0)} to ${prof.hi.toFixed(0
 // how fast the software renderer happens to be that minute, and the first
 // version of this test duly gave 15.0 on one run and 10.5 on the next. Bounding
 // it by distance makes the SAME corners get driven every time.
+// ---- THE RACE HOLD, WHICH BROKE FOUR OF THESE TESTS ------------------------
+//
+// main.js kills the throttle and pins st.speed at zero while race.state is
+// 'grid' or 'countdown' — deliberately, so a launch cannot depend on an engine
+// pulling against a brake. The game boots in 'grid'. So every test below that
+// writes st.speed and then expects the car to move was, from the moment the
+// race state machine landed, measuring a car being held on the line: the
+// autopilot covered 0 of 9,000 units and the hands-off test reported a worst
+// offset of 0.0, which reads exactly like a track that cannot be driven and a
+// car that steers itself perfectly. Both were true only because nothing moved.
+//
+// Confirmed against the commit before the gantries went in: identical
+// failures, so this is the state machine's own regression and not the
+// scenery's. The fix belongs here rather than in main.js — the hold is correct
+// behaviour and a harness that wants to drive has to take the car off the grid
+// first, which is what a player does by pressing go.
 const DRIVE_FROM = 0;
 const DRIVE_LEN = 9000;                          // 1500 segments, a good sample
 const runDrive = (mayBrake) => page.evaluate(async ({ canBrake, from, len }) => {
   const R = window.RACER;
   const ROAD_W = R.consts.ROAD_W;
+  R.race.state = 'racing';                       // off the grid, or nothing moves
   R.tune.si = 5; R.tune.maxSpeed = 300;          // hardest setting
   R.tilt.on = true;                              // pretend a phone is tilting
   // TOP GEAR, or the limiter holds the car at 30% of the speed this test exists
@@ -191,6 +233,7 @@ console.log(`       (mean offset ${drive.mean.toFixed(2)}, braked on ` +
 const idle = await page.evaluate(async ({ from, len }) => {
   const R = window.RACER;
   const ROAD_W = R.consts.ROAD_W;
+  R.race.state = 'racing';                       // off the grid, or nothing moves
   R.tune.si = 5; R.tune.maxSpeed = 300;
   R.tilt.on = true; R.tilt.out = 0;
   // TOP GEAR, or the limiter holds the car at 30% of the speed this test exists
@@ -265,6 +308,12 @@ const reach = await page.evaluate(async () => {
     const target = R.st.simT + secs;
     const giveUp = performance.now() + secs * 8000 + 10000;
     const poll = () => {
+      // EVERY FRAME, not once at the top. A long pull crosses the finish line,
+      // which puts the race into 'done' and six seconds later calls startRace()
+      // — and startRace resets st.dist AND st.speed. A speed measurement that
+      // silently restarts halfway through reports the acceleration of the last
+      // two seconds as the top speed of the car.
+      R.race.state = 'racing';
       if (R.st.simT >= target) return done();
       if (performance.now() > giveUp) return fail(new Error('sim clock stalled'));
       requestAnimationFrame(poll);
@@ -317,6 +366,12 @@ const pedals = await page.evaluate(async () => {
     const target = R.st.simT + secs;
     const giveUp = performance.now() + secs * 8000 + 10000;
     const poll = () => {
+      // EVERY FRAME, not once at the top. A long pull crosses the finish line,
+      // which puts the race into 'done' and six seconds later calls startRace()
+      // — and startRace resets st.dist AND st.speed. A speed measurement that
+      // silently restarts halfway through reports the acceleration of the last
+      // two seconds as the top speed of the car.
+      R.race.state = 'racing';
       if (R.st.simT >= target) return done();
       if (performance.now() > giveUp) return fail(new Error('sim clock stalled'));
       requestAnimationFrame(poll);
@@ -352,28 +407,43 @@ const sc = await page.evaluate(async () => {
   const R = window.RACER;
   const frame = () => new Promise((r) => requestAnimationFrame(() => r()));
   for (let i = 0; i < 24; i++) document.getElementById('bUp').click();
+  R.race.state = 'racing';
   R.tune.si = 5; R.tune.maxSpeed = 300; R.st.speed = 300;
+  // PARK IT WHERE THE FRAME IS MOST EXPENSIVE, which is now on the run-in to a
+  // gantry: the structure and its banner are two more calls, and they are only
+  // spent when one of the two lines is inside the draw distance. Left to
+  // whatever position the previous test happened to end at, this sampled a
+  // gantry frame by luck on one run and an open-road frame on the next, which
+  // is a budget check that reports a different budget each time.
+  R.st.dist = R.consts.RACE_FROM + R.consts.RACE_LEN - 60;
   let max = 0, at = '';
   for (const view of [3, 1]) {
     R.st.view = view;
     for (let i = 0; i < 8; i++) {
       await frame();
       const c = R.renderer.info.render.calls;
-      if (c > max) { max = c; at = `${view === 3 ? 'third' : 'first'} person, scenery ${R.scenery ? R.scenery.count : 'max'}`; }
+      if (c > max) { max = c; at = `${view === 3 ? 'third' : 'first'} person, scenery ` +
+        `${R.scenery ? R.scenery.count : 'max'}, gantry ${R.gantry ? R.gantry.stats.at : 'n/a'}`; }
     }
   }
   return { max, at, scenery: document.getElementById('hud') ? null : null };
 });
 // THE DRAW CALL BUDGET, itemised, because "keep it low" is not a budget:
 //   road 1 · posts 1 · scenery 1 + 1 ink · car 2 + 1 ink · cockpit 2 + 1 ink
-// which is 10, and 16 leaves room to be wrong about one of them. The
+//   · gantry 1 + 1 banner
+// which is 12, and 16 leaves room to be wrong about one of them. The
 // placeholder box car spends 5 on itself and 5 more on its ink; the real car
 // must merge by material so body and ink are three calls between them.
 ok(sc.max <= 16, 'draw calls stay inside the budget at the WORST moment',
    `${sc.max} of 16, worst at ${sc.at}`);
 
 // ---- 8. a picture, because numbers have lied on this project before ---------
-await page.evaluate(() => { window.RACER.tilt.out = 0; });
+await page.evaluate(() => {
+  const R = window.RACER;
+  R.tilt.out = 0;
+  R.race.state = 'racing';
+  R.st.speed = 205; R.st.gear = 4;
+});
 await page.waitForTimeout(600);
 await page.screenshot({ path: join(ROOT, 'shot.png') });
 console.log('\n  wrote shot.png');

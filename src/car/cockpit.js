@@ -20,8 +20,8 @@
 // The previous version of this file spent all of that and still could not draw
 // a tick mark, a numeral, a wiper arm or a finger grip, because every one of
 // those is a dozen quads it did not have. Drawn into a canvas at boot they are
-// free: the whole cockpit is ONE 1024x960 canvas painted once, shown as SEVEN
-// screen-space quads in a single draw call, fourteen triangles.
+// free: the whole cockpit is ONE 1024x960 canvas painted once, shown as
+// THIRTEEN screen-space quads in a single draw call, twenty-six triangles.
 //
 // WHAT MOVES. The wheel turns and two needles sweep. They are separate quads
 // cut from the same canvas, and turning one means rotating FOUR CORNERS about a
@@ -36,6 +36,13 @@
 // them — eight floats on a shift, nothing between shifts, and still no canvas
 // touched after boot. Its colour is a tint like the lamps', because "you are
 // labouring" is a state and not a shape.
+//
+// THE RACE CLOCK AND THE COUNTDOWN ARE THE SAME TRICK, four places and one
+// glyph. The radio's green display shows the lap time as four seven-segment
+// quads reading a strip of ten cells, and the countdown across the dash top is
+// one quad reading a strip of four — 3, 2, 1 and GO. A clock that ran a
+// fillText would repaint and re-upload a 1024x960 canvas ten times a second,
+// which is the one thing this file exists not to do. See THE RACE READOUT.
 //
 // HOW IT IS PINNED TO THE SCREEN. The mesh's vertices are stored in normalised
 // device coordinates and its matrixWorld is composed in onBeforeRender from the
@@ -81,6 +88,19 @@
 //            which is every frame except the shift itself. Measured with the
 //            scene wound up at 1440x720: 9 calls and 46,124 triangles for the
 //            whole game, against 9 and 46,122 before.
+//   and now  1 draw call, 26 triangles. The race readout — a four-place clock
+//            on the radio, the BEST tag beside it and the countdown across the
+//            dash top — added six quads and TWELVE triangles and, again, no
+//            draw call, because every one of them is cut from the atlas that
+//            was already bound. Measured on the grid at 1440x720 with
+//            tools/racedash.mjs: 9 calls and 46,076 triangles for the whole
+//            game against 9 and 46,064 before, in every race state there is.
+//
+//            Per frame it is cheaper than the gear numeral was: eight floats
+//            when the tenths digit rolls over, ten times a second, and nothing
+//            whatever on the other fifty frames. No string is built, no canvas
+//            is touched and nothing is allocated — the time is split into
+//            places with integer arithmetic and each place is a UV move.
 //
 // Both measured with the scene frozen and the cockpit toggled, so the numbers
 // are the cockpit's own and not the road's.
@@ -133,6 +153,49 @@ const LMP_X = 600, LMP_Y = 448, LMP_W = 128, LMP_H = 64;
 // y 680, both inside the atlas.
 const DIG_X = 592, DIG_Y = 616, DIG_W = 48, DIG_H = 64;
 const DIG_STRIDE = 72, DIG_N = 6;
+
+// THE CLOCK'S SEVEN-SEGMENT DIGITS, ten cells, drawn at boot.
+//
+// Same trick as the gear numeral and for the same reason — the dash canvas is
+// painted once — but four quads share the strip instead of one, because a
+// clock has four places that change and a gearbox has one. See the arithmetic
+// under THE RACE READOUT below for what that costs.
+//
+// DRAWN AS SEGMENTS, NOT SET IN A TYPEFACE. The readout is 129 x 16 device
+// pixels of green glass on a car radio; a sans-serif digit shrunk into 13 of
+// those pixels is a web page's idea of a clock, and it is also mush. Seven
+// bars with mitred ends are what that panel actually contains, they are drawn
+// from rectangles so nothing depends on what "sans-serif" resolves to on the
+// device, and each cell carries the six UNLIT bars as well — the ghost of the
+// figure eight that a real LCD shows behind whatever it is displaying.
+//
+// THE CELL IS 16 ATLAS PIXELS TALL FOR A 13.5-PIXEL DIGIT — very nearly 1:1 on
+// the owner's phone, so the segments land on pixels rather than being
+// resampled. Everything else in this atlas is drawn in ART pixels and arrives
+// magnified 1.686x at 1440x720; that is fine for a dashboard and hopeless for
+// a 2-pixel bar, which is why this one region is sized in device pixels.
+const SEG_X = 540, SEG_Y = 704, SEG_W = 10, SEG_H = 16;
+const SEG_STRIDE = 24, SEG_N = 10;
+// The BEST tag, the one word in the display. Lit when the number on the glass
+// is a personal best rather than the clock, unlit — the dark green a dead LCD
+// segment is — when it is the clock. One drawing, two tints, twelve floats.
+const TAG_X = 540, TAG_Y = 748, TAG_W = 40, TAG_H = 12;
+// THE COUNTDOWN, four cells: 3, 2, 1 and GO.
+//
+// ONE QUAD SHOWS ALL FOUR. They are different pictures and different shapes —
+// GO is twice as wide as a numeral — so the quad's UVs AND its corners are
+// rewritten on each change: sixteen floats, four times, in the three seconds
+// before a race, and nothing at all for the rest of the run.
+//
+// DRAWN IN ART PIXELS, NOT DEVICE PIXELS, unlike the clock digits above. At
+// the size these appear a cell drawn 1:1 with the panel would be 240 pixels
+// square and the four of them would not fit in the atlas without growing it by
+// a megabyte, for a picture that is on screen for three seconds. Magnified
+// 1.686x they are exactly as sharp as the dashboard they stand on, which is
+// the only standard that matters here — the softness is shared with every
+// other line in the frame rather than being a property of this one.
+const CD_X = 540, CD_Y = 786, CD_W = 130, CD_H = 150, CD_STRIDE = 146, CD_N = 3;
+const GO_X = 750, GO_Y = 450, GO_W = 260, GO_H = 144;
 
 // ------------------------------------------------------------ the framing
 //
@@ -319,6 +382,117 @@ const LAMP_Y = 0.762;
 const LAMP_DX = 0.205;
 const LAMP_W_F = 0.049;         // frame widths
 const LAMP_H_F = 0.048;         // frame heights
+
+// ------------------------------------------------------ THE RACE READOUT
+//
+// TWO PLACES, AND NEITHER OF THEM IS A CORNER OF THE SCREEN.
+//
+// 1. THE LAP TIME GOES IN THE RADIO. The car already has a display in it: the
+//    green glass on the panel above the centre vent, which this file has drawn
+//    since the dash was first painted and which said nothing. It is 129 x 16
+//    DEVICE PIXELS at 1440x720 — measured off a frame with tools/lcdbox.mjs,
+//    not derived, and the brief's 107 was 22 pixels short. Too small for a
+//    word and exactly the size of `0:00.0`, which is what a radio-shaped
+//    readout is for. Nothing new is added to the dashboard: a panel that was
+//    already there is switched on.
+//
+// 2. THE COUNTDOWN GOES ACROSS THE DASH TOP, standing on the scuttle. It is
+//    the biggest thing in the frame for three seconds and it is never seen
+//    again, so it costs nothing on any frame that matters. See CD_CAP.
+//
+// WHAT THE WHOLE READOUT COSTS. Six new quads — four clock digits, the BEST
+// tag and the countdown — so twelve triangles on top of the fourteen this file
+// had, and NOT ONE NEW DRAW CALL: every cell of it is cut from the same atlas
+// and drawn by the same material as the wheel and the dials.
+//
+// Per frame, while racing: the tenths digit changes ten times a second and
+// writes eight floats when it does; the seconds change once a second; the
+// minutes and the tag change essentially never. Nothing is drawn, uploaded or
+// allocated — there is no string, no toFixed and no fillText anywhere below,
+// because a clock formatted with a template literal allocates sixty strings a
+// second and this runs on a phone with a shared 2GB.
+const RADIO_FX = 0.215, RADIO_FW = 0.185;         // the panel, frame widths
+const RADIO_DY = 0.098, RADIO_FH = 0.052;         // below DASH_TOP(0.30)
+// The glass, hoisted out of drawDash so the digits that stand on it are placed
+// from the same four numbers that paint it. Changing the panel moves both.
+const LCD_FX = RADIO_FX + RADIO_FW * 0.30;
+const LCD_FW = RADIO_FW * 0.40;                   // 0.074 frame widths, 129 device px
+const LCD_FY = DASH_TOP(0.30) + RADIO_DY + RADIO_FH * 0.28;
+const LCD_FH = RADIO_FH * 0.42;                   // 0.0218 frame heights, 16 device px
+/**
+ * THE READOUT'S LAYOUT, ALL OF IT IN FRACTIONS OF THE GLASS IT SITS ON, so the
+ * one measurement the whole thing depends on is the size of that glass.
+ *
+ * MEASURED BEFORE IT WAS COMMITTED TO, because the brief said to and because
+ * this project has shipped a fit test that checked one screen edge and not the
+ * other. At 1440x720 the glass is 129 x 16 device pixels and the readout works
+ * out at:
+ *
+ *   digit    13.5 px tall, 8.4 wide, on 2.0-pixel segments
+ *   number   `0:00.0`, six glyphs, 61 px wide — right-aligned, ending 4 px
+ *            short of the right-hand edge
+ *   BEST     30 x 9 px, hard against the left-hand edge
+ *   between  27 px of bare green, which is what a radio display looks like
+ *
+ * 61 + 30 = 91 of 129, so the two ends of the readout cannot collide however
+ * the panel is resized; tools/racedash.mjs re-measures both ends on the real
+ * frame rather than trusting this comment.
+ */
+const LCD_DIG_H = 0.845;        // digit height, fraction of the glass's height
+const LCD_DIG_AR = 0.62;        // and its width, fraction of its own height
+const LCD_SEG_T = 0.15;         // segment thickness, same units
+const LCD_GAP = 0.52;           // between glyphs, fraction of a digit's width
+const LCD_COLON_W = 0.40, LCD_POINT_W = 0.34;
+const LCD_PAD = 0.035;          // clear at each end, fraction of the glass
+const LCD_TAG_H = 0.58;         // the BEST tag, fraction of the glass's height
+// The lit green and the dead green. Both are tints on one white drawing, the
+// way the lamps and the gear numeral work, so a digit that is off costs twelve
+// floats rather than a second set of ten cells.
+const LCD_LIT = new Color(0x8af2b4);
+const LCD_DIM = new Color(0x39605a);
+
+/**
+ * THE COUNTDOWN, AND WHY IT IS A NUMERAL AND NOT A ROW OF LIGHTS.
+ *
+ * BOTH WERE BUILT AND BOTH WERE PHOTOGRAPHED, and the lights lost on geometry
+ * rather than on taste. shots/rd-lights-3.png and rd-lights-1.png are a
+ * five-lamp start tree laid across the dash top at 1440x720, evenly spaced at
+ * 0.17 to 0.83 of the frame; the wheel's rim covers x 601..1097 at the height
+ * that row has to sit at, so lamps three and four land on the rim and the
+ * binnacle. Drawn in front they are two stickers on a steering wheel; drawn
+ * behind, the row is three lamps and a hole. And with only one lamp lit at the
+ * top of the count — shots/rd-lights-3.png — the whole countdown is one red
+ * pill 70 pixels wide at the far left of the dash, which is a tell-tale and
+ * not a start signal.
+ *
+ * The numeral has ONE thing to place rather than five, so it can stand in the
+ * one clear space the dash top has.
+ *
+ * WHERE IT STANDS. Dead centre of the frame — not centred on the driver, who
+ * sits at 0.575 — with its FEET ON THE SCUTTLE, the ink of the glyph resting
+ * on the line where the dashboard meets the bonnet. That is what keeps it from
+ * floating: it is not hovering over the road, it is standing on the dashboard,
+ * and the near edge of the dash crosses its base. The rest of it rises into
+ * the bottom of the windscreen, which during a countdown contains a stationary
+ * picture of a road the car is not yet allowed to drive down.
+ *
+ * CAP HEIGHT 0.275 OF THE FRAME is 198 device pixels on the owner's phone,
+ * against 137 for a dial and 37 for the gear numeral. The largest thing in the
+ * frame, as the brief asks, and gone after three seconds.
+ *
+ * MEASURED, by tools/cdcap.mjs, off the frames rather than off this constant:
+ * the amber face is 196 device pixels tall for the 2, the 1 and GO, and 190
+ * for the 3 — the missing six are where the wheel's rim passes across its
+ * foot, which is the whole point of the draw order chosen below.
+ */
+const CD_FX = 0.5;              // frame widths: the centre of the picture
+const CD_CAP = 0.275;           // cap height, frame heights
+const CD_FEET = 0.006;          // how far the ink sinks below DASH_TOP(0.5)
+const CD_HOLD = 0.7;            // how long GO stays up once the lights go out
+// Amber for the count and green for GO, which is the only pair of colours a
+// driver does not have to be taught. Both are tints on the white drawing.
+const CD_WAIT = new Color(0xffae2e);
+const CD_GO = new Color(0x7bf05a);
 
 // ------------------------------------------------------------------ colour
 //
@@ -750,18 +924,18 @@ function drawDash(x, W, H, o) {
     x.fillRect(vx + 8, vy + 6, vw - 16, 4);
   }
   {
-    // a small radio panel above the vent, with two knobs
-    const px = 0.215 * W, pw = 0.185 * W;
-    const py = (dt(0.30) + 0.098) * H, ph = 0.052 * H;
+    // a small radio panel above the vent, with two knobs — and the display in
+    // it is the lap timer, so the glass is drawn by drawLcdStatic below
+    const px = RADIO_FX * W, pw = RADIO_FW * W;
+    const py = (dt(0.30) + RADIO_DY) * H, ph = RADIO_FH * H;
     rrect(x, px, py, pw, ph, 6);
     ink(x, C.trimDark, 5);
-    x.fillStyle = '#2c4b46';
-    x.fillRect(px + pw * 0.30, py + ph * 0.28, pw * 0.40, ph * 0.42);
     for (const kx of [px + pw * 0.14, px + pw * 0.86]) {
       x.beginPath(); x.arc(kx, py + ph * 0.5, ph * 0.26, 0, TAU);
       ink(x, C.chrome, 3);
     }
   }
+  drawLcdStatic(x, W, H, false);
 
   // ---- driver's side: door card and a corner vent -------------------------
   {
@@ -1142,6 +1316,199 @@ function drawGearDigits(x) {
   }
 }
 
+// ------------------------------------------------------- the radio's glass
+//
+// The display itself: the sunk green rectangle, and the two marks on it that
+// never change — the colon between the minutes and the seconds, and the point
+// before the tenths. Those two are PAINTED INTO THE DASH rather than given
+// quads of their own, because they are four dots that never move and a quad
+// each would be four triangles to draw something the dash can draw for free.
+//
+// IT IS A SEPARATE FUNCTION FOR THE SAME REASON drawDials IS. Mirroring the
+// canvas for a left-hand-drive cockpit mirrors everything painted on it, and a
+// mirrored `0:00.0` reads `0.00:0` — the colon and the point swap ends. So the
+// glass is drawn again, the right way round, over the mirrored copy of itself.
+function drawLcdStatic(x, W, H, mirrored) {
+  const at = (fx) => (mirrored ? 1 - fx : fx) * W;
+  const lx = at(LCD_FX) - (mirrored ? LCD_FW * W : 0);
+  const lw = LCD_FW * W, ly = LCD_FY * H, lh = LCD_FH * H;
+  // the glass. Darker at the top, the way a recessed panel catches the light
+  // from the windscreen on its lower lip and not its upper one.
+  x.fillStyle = '#24403c'; x.fillRect(lx, ly, lw, lh);
+  x.fillStyle = '#2c4b46'; x.fillRect(lx, ly + lh * 0.22, lw, lh * 0.78);
+  // and the shadow the recess casts along its top and left edges
+  x.fillStyle = 'rgba(0,0,0,0.45)';
+  x.fillRect(lx, ly, lw, lh * 0.10);
+  x.fillRect(lx, ly, lw * 0.012, lh);
+
+  // ONE FUNCTION DECIDES WHERE EVERY GLYPH GOES, and it is called here to
+  // paint the colon and again in buildCockpit to place the digit quads. Two
+  // copies of this arithmetic is how a colon ends up drawn through a digit.
+  const s = lcdSlots(lw, lh);
+  const t = Math.max(1, LCD_SEG_T * s.dh);
+  x.fillStyle = '#8af2b4';
+  x.fillRect(lx + s.colon, ly + s.dy + s.dh * 0.26, t, t);
+  x.fillRect(lx + s.colon, ly + s.dy + s.dh * 0.64, t, t);
+  x.fillRect(lx + s.point, ly + s.dy + s.dh - t, t, t);
+}
+
+/**
+ * WHERE EACH GLYPH SITS ON THE GLASS, in pixels from its top-left corner,
+ * whatever pixels the caller is working in.
+ *
+ * Right-aligned and walked leftward: tenths, point, seconds, seconds, colon,
+ * minutes. Right-aligned rather than centred because the number is the thing
+ * that changes width if this ever shows something else, and a readout whose
+ * digits move sideways as the time passes is unreadable at 200mph.
+ */
+function lcdSlots(lw, lh) {
+  const dh = LCD_DIG_H * lh, dw = LCD_DIG_AR * dh, gap = LCD_GAP * dw;
+  const cw = LCD_COLON_W * dw, pw = LCD_POINT_W * dw;
+  const d3 = lw * (1 - LCD_PAD) - dw;
+  const point = d3 - gap - pw;
+  const d2 = point - gap - dw;
+  const d1 = d2 - gap - dw;
+  const colon = d1 - gap - cw;
+  const d0 = colon - gap - dw;
+  return { dh, dw, dy: (lh - dh) * 0.5, digit: [d0, d1, d2, d3], colon, point,
+           tagH: LCD_TAG_H * lh, tagW: (LCD_TAG_H * lh) * (TAG_W / TAG_H),
+           tagX: lw * LCD_PAD, numW: dw * 4 + cw + pw + gap * 5 };
+}
+
+// ------------------------------------------------- the seven-segment digits
+//
+// Ten cells, drawn WHITE so the green is a tint, with the six segments a digit
+// does NOT use drawn behind it in near-black — the ghost of the eight, which
+// is the single thing that makes a green rectangle read as a liquid-crystal
+// display rather than as a sticker. The ghost is black at 30%, so the vertex
+// colour that greens the lit bars leaves it dark whatever tint is applied.
+//
+// Bars are mitred hexagons rather than rectangles. It is six more lineTos per
+// segment, drawn once, and at two device pixels wide it is the difference
+// between a digit and a barcode.
+const SEG_MASK = [0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, 0x7f, 0x6f];
+
+function segBar(x, horiz, a, b, c, t) {
+  const h = t * 0.5;
+  if (horiz) poly(x, [a + h, c - h, b - h, c - h, b, c, b - h, c + h, a + h, c + h, a, c]);
+  else poly(x, [c - h, a + h, c - h, b - h, c, b, c + h, b - h, c + h, a + h, c, a]);
+}
+
+function drawSegDigits(x) {
+  const w = SEG_W, h = SEG_H, t = Math.max(2, Math.round(SEG_H * 0.15));
+  const hh = h * 0.5;
+  for (let k = 0; k < SEG_N; k++) {
+    const ox = k * SEG_STRIDE, m = SEG_MASK[k];
+    // a  b  c  d  e  f  g, in the order the mask numbers them
+    const segs = [
+      [1, t * 0.5, w - t * 0.5, t * 0.5],          // a  top
+      [0, t * 0.5, hh, w - t * 0.5],               // b  upper right
+      [0, hh, h - t * 0.5, w - t * 0.5],           // c  lower right
+      [1, t * 0.5, w - t * 0.5, h - t * 0.5],      // d  bottom
+      [0, hh, h - t * 0.5, t * 0.5],               // e  lower left
+      [0, t * 0.5, hh, t * 0.5],                   // f  upper left
+      [1, t * 0.5, w - t * 0.5, hh],               // g  middle
+    ];
+    for (let s = 0; s < 7; s++) {
+      const [horiz, a, b, c] = segs[s];
+      x.save();
+      x.translate(ox, 0);
+      segBar(x, horiz === 1, a, b, c, t);
+      x.fillStyle = (m >> s) & 1 ? '#ffffff' : 'rgba(0,0,0,0.30)';
+      x.fill();
+      x.restore();
+    }
+  }
+}
+
+/**
+ * The BEST tag. Four letters in 40 x 12 atlas pixels, which is 30 x 9 on the
+ * panel, and it is the ONE place in this file where a typeface is unavoidable:
+ * a word is a word. So it is drawn once, at boot, into a cell, and it is
+ * SQUEEZED TO FIT THE CELL BY MEASUREMENT — measureText, then a horizontal
+ * scale — rather than by choosing a font size and hoping. "sans-serif"
+ * resolves to something different on every WebView this might land on, and a
+ * tag that fits on Chrome and overruns the glass on a Samsung browser is the
+ * fit bug this project has already shipped once.
+ */
+function drawTag(x, W, H) {
+  x.textAlign = 'left';
+  x.textBaseline = 'middle';
+  x.font = `bold ${Math.round(H * 0.86)}px sans-serif`;
+  const w = x.measureText('BEST').width;
+  x.save();
+  x.translate(1, H * 0.5);
+  x.scale((W - 2) / Math.max(1, w), 1);
+  x.fillStyle = '#ffffff';
+  x.fillText('BEST', 0, 0);
+  x.restore();
+}
+
+/**
+ * The countdown's glyphs: 3, 2, 1 and GO.
+ *
+ * WHITE ON A HEAVY INK OUTLINE, the same treatment as the gear numeral and as
+ * every other shape in this cockpit, because that outline is what stops a
+ * numeral from looking printed on the glass by a web page. At this size the
+ * outline is 13 atlas pixels, which is the file's silhouette weight of 7
+ * scaled up in proportion to the glyph.
+ *
+ * AND A CAST SHADOW, thrown down and to the driver's side. That is the cue
+ * that says the numeral is a solid thing standing on the dashboard rather than
+ * a picture composited over it, and it costs a second fillText.
+ *
+ * THERE IS NO CONTACT SHADOW POOLED UNDER ITS FEET, and there was one for an
+ * afternoon. It is the stronger cue of the two and here it is worth nothing:
+ * the numeral stands at the middle of the frame, and what is directly under
+ * its feet there is the binnacle hood, which is #1b1e23. A soft black pool on
+ * near-black is a soft black pool nobody can see — shots/rd-cd3-foot.png at 3x
+ * is where that was established, and the cells went back to being as deep as
+ * the glyph in them.
+ */
+function drawCountGlyph(x, w, h, s) {
+  x.textAlign = 'center';
+  x.textBaseline = 'middle';
+  x.font = `bold ${Math.round(h * 0.95)}px sans-serif`;
+  x.lineJoin = 'round';
+  x.lineCap = 'round';
+  const cx = w * 0.5, cy = h * 0.5;
+  x.save();
+  x.globalAlpha = 0.38;
+  x.fillStyle = '#000000';
+  x.fillText(s, cx + h * 0.045, cy + h * 0.055);
+  x.restore();
+  x.strokeStyle = INKC; x.lineWidth = Math.max(6, h * 0.088);
+  x.strokeText(s, cx, cy);
+  x.fillStyle = '#ffffff';
+  x.fillText(s, cx, cy);
+}
+
+/**
+ * The bounding box of the WHITE in a cell, read back off the canvas.
+ *
+ * The quad that shows a glyph is sized from what was actually drawn, never
+ * from the font size that was asked for — cap height is 0.70 of the em box in
+ * one grotesque and 0.73 in the next, and "sans-serif" is whatever the device
+ * has. This is the same readback the gear numeral does, generalised so the
+ * countdown's four cells can each be measured on their own.
+ */
+function measureInk(g, x0, y0, w, h) {
+  const d = g.getImageData(x0, y0, w, h).data;
+  let top = -1, bot = -1, left = w, right = -1;
+  for (let y = 0; y < h; y++) {
+    for (let px = 0; px < w; px++) {
+      const i = (y * w + px) * 4;
+      if (d[i + 3] > 128 && d[i] > 160 && d[i + 1] > 160) {
+        if (top < 0) top = y;
+        bot = y;
+        if (px < left) left = px;
+        if (px > right) right = px;
+      }
+    }
+  }
+  return top < 0 ? null : { top, bot, left, right, h: bot - top + 1, w: right - left + 1 };
+}
+
 // =========================================================================
 /**
  * Build the cockpit.
@@ -1178,6 +1545,16 @@ export function buildCockpit(o = {}) {
   inRegion(NDL_X, NDL_Y, NDL_W, NDL_H, (x, w, h) => drawNeedle(x, w, h));
   inRegion(LMP_X, LMP_Y, LMP_W, LMP_H, (x, w, h) => drawLamp(x, w, h));
   inRegion(DIG_X, DIG_Y, DIG_N * DIG_STRIDE, DIG_H, (x) => drawGearDigits(x));
+  inRegion(SEG_X, SEG_Y, SEG_N * SEG_STRIDE, SEG_H, (x) => drawSegDigits(x));
+  inRegion(TAG_X, TAG_Y, TAG_W, TAG_H, (x, w, h) => drawTag(x, w, h));
+  // The countdown's four cells. 3, 2 and 1 share a strip of equal cells; GO is
+  // twice as wide and lives in its own, so each is measured separately below
+  // and the quad takes the shape of whichever is on show.
+  for (let k = 0; k < CD_N; k++) {
+    inRegion(CD_X + k * CD_STRIDE, CD_Y, CD_W, CD_H,
+             (x, w, h) => drawCountGlyph(x, w, h, String(CD_N - k)));
+  }
+  inRegion(GO_X, GO_Y, GO_W, GO_H, (x, w, h) => drawCountGlyph(x, w, h, 'GO'));
 
   // HOW BIG THE NUMERAL ACTUALLY CAME OUT, read back off the canvas rather
   // than derived from the font size. Cap height is not a fraction of the em box
@@ -1231,6 +1608,24 @@ export function buildCockpit(o = {}) {
     g.drawImage(tmp, 0, 0);
     g.restore();
     inRegion(ART_X, ART_Y, ART_W, ART_H, (x, w, h) => drawDials(x, w, h, true));
+    // and the radio's glass, for the same reason the dials are redrawn: a
+    // mirrored `0:00.0` puts the point where the colon belongs.
+    inRegion(ART_X, ART_Y, ART_W, ART_H, (x, w, h) => drawLcdStatic(x, w, h, true));
+  }
+
+  // WHAT THE COUNTDOWN'S GLYPHS ACTUALLY CAME OUT AS, read back off the canvas
+  // one cell at a time. Sized from the drawing rather than from the font size
+  // for the reason the gear numeral is, and measured per cell because GO and
+  // the numerals are different shapes in differently shaped cells: the quad
+  // has to take the shape of whichever one is showing, so each needs its own.
+  const CD_CELL = [];
+  for (let k = 0; k <= CD_N; k++) {
+    const cx = k < CD_N ? CD_X + k * CD_STRIDE : GO_X;
+    const cy = k < CD_N ? CD_Y : GO_Y;
+    const cw = k < CD_N ? CD_W : GO_W, ch = k < CD_N ? CD_H : GO_H;
+    const m = measureInk(g, cx, cy, cw, ch)
+              || { top: 0, bot: ch - 1, left: 0, right: cw - 1, h: ch, w: cw };
+    CD_CELL.push({ x: cx, y: cy, w: cw, h: ch, ink: m });
   }
 
   const tex = new CanvasTexture(canvas);
@@ -1253,7 +1648,7 @@ export function buildCockpit(o = {}) {
   tex.magFilter = LinearFilter;
   tex.anisotropy = 1;
 
-  // ------------------------------------------------------- the six quads
+  // ------------------------------------------------------ the thirteen quads
   //
   // Index order IS draw order inside a single call, so this list is also the
   // back-to-front order: the dash, then the tell-tales and needles on top of
@@ -1268,16 +1663,43 @@ export function buildCockpit(o = {}) {
   // numeral floating on top of a spoke is precisely the "web overlay" this is
   // meant not to be. Under the needle for the same reason, so the needle
   // sweeps over the printed face the way it does on a real dial.
-  const Q_DASH = 0, Q_GEAR = 1, Q_LAMP_L = 2, Q_LAMP_R = 3;
-  const Q_NDL_R = 4, Q_NDL_S = 5, Q_WHEEL = 6;
+  //
+  // THE CLOCK GOES IN AT INDEX 2, WITH THE GEAR NUMERAL, for the same reason
+  // the gear numeral is there: everything that moves has to be able to pass in
+  // FRONT of a printed readout, or the readout stops being part of the dash
+  // and becomes an overlay. Nothing reaches the radio panel today — it is far
+  // over on the passenger side — but the rule is cheap to keep and expensive
+  // to rediscover.
+  //
+  // AND THE COUNTDOWN GOES UNDER THE WHEEL, which is not where it started.
+  // In front of the wheel the numeral is legible and it floats; behind it, the
+  // rim crosses the foot of the glyph and the thing is suddenly IN the car
+  // rather than on the screen — shots/rd-cd3-behind-crop.png has the rim
+  // across the base of the 3 and rd-go-behind-crop.png has it under the O of
+  // GO, both still perfectly readable. Both orders were photographed before
+  // this was decided.
+  //
+  // The worry that put it in front first — that a spoke would cut the numeral
+  // in half — does not happen. The glyph stands at 0.5 of the frame and the
+  // wheel is centred at 0.575 with spokes reaching 0.42 of its sprite, so the
+  // one that comes round the top at full lock sweeps up the far side of it.
+  const Q_DASH = 0, Q_GEAR = 1;
+  const Q_LCD0 = 2, Q_TAG = 6, Q_LAMP_L = 7, Q_LAMP_R = 8;
+  const Q_NDL_R = 9, Q_NDL_S = 10, Q_COUNT = 11, Q_WHEEL = 12;
   const QUADS = [
     [ART_X, ART_Y, ART_W, ART_H],                 // 0 dash, everything static
     [DIG_X, DIG_Y, DIG_W, DIG_H],                 // 1 gear numeral, UVs moved
-    [LMP_X, LMP_Y, LMP_W, LMP_H],                 // 2 tell-tale, driver's left
-    [LMP_X, LMP_Y, LMP_W, LMP_H],                 // 3 tell-tale, driver's right
-    [NDL_X, NDL_Y, NDL_W, NDL_H],                 // 4 tacho needle
-    [NDL_X, NDL_Y, NDL_W, NDL_H],                 // 5 speedo needle
-    [WHL_X, WHL_Y, WHL_S, WHL_S],                 // 6 the wheel, in front
+    [SEG_X, SEG_Y, SEG_W, SEG_H],                 // 2 clock, minutes
+    [SEG_X, SEG_Y, SEG_W, SEG_H],                 // 3 clock, tens of seconds
+    [SEG_X, SEG_Y, SEG_W, SEG_H],                 // 4 clock, seconds
+    [SEG_X, SEG_Y, SEG_W, SEG_H],                 // 5 clock, tenths
+    [TAG_X, TAG_Y, TAG_W, TAG_H],                 // 6 the BEST tag, tinted
+    [LMP_X, LMP_Y, LMP_W, LMP_H],                 // 7 tell-tale, driver's left
+    [LMP_X, LMP_Y, LMP_W, LMP_H],                 // 8 tell-tale, driver's right
+    [NDL_X, NDL_Y, NDL_W, NDL_H],                 // 9 tacho needle
+    [NDL_X, NDL_Y, NDL_W, NDL_H],                 // 10 speedo needle
+    [CD_X, CD_Y, CD_W, CD_H],                     // 11 the countdown, UVs moved
+    [WHL_X, WHL_Y, WHL_S, WHL_S],                 // 12 the wheel, in front
   ];
   const NQ = QUADS.length;
 
@@ -1320,6 +1742,26 @@ export function buildCockpit(o = {}) {
     setQuad(Q_GEAR, fx2a(WHEEL_X - DIAL_DX),
             fy2a(DIAL_Y) + GEAR_CY_R * dr - inkOff, -hw, -hh, hw, hh);
   }
+  // THE CLOCK, ON THE RADIO'S GLASS. Everything here is in art pixels, cut
+  // from the same lcdSlots the colon was painted with, so a digit cannot land
+  // on the mark that separates it from its neighbour.
+  //
+  // fx2a takes the CENTRE of each slot, not its left edge: mirroring a left
+  // edge for a left-hand-drive cockpit moves the digit by its own width, which
+  // is the bug the fw2a comment above is about, one scale down.
+  const lcdW = LCD_FW * AW, lcdH = LCD_FH * AH;
+  const slot = lcdSlots(lcdW, lcdH);
+  {
+    const lx = LCD_FX * AW, ly = LCD_FY * AH;
+    for (let k = 0; k < 4; k++) {
+      const cx = (lx + slot.digit[k] + slot.dw * 0.5) / AW;
+      setQuad(Q_LCD0 + k, fx2a(cx), ly + slot.dy + slot.dh * 0.5,
+              -slot.dw * 0.5, -slot.dh * 0.5, slot.dw * 0.5, slot.dh * 0.5);
+    }
+    const tcx = (lx + slot.tagX + slot.tagW * 0.5) / AW;
+    setQuad(Q_TAG, fx2a(tcx), ly + lcdH * 0.5,
+            -slot.tagW * 0.5, -slot.tagH * 0.5, slot.tagW * 0.5, slot.tagH * 0.5);
+  }
   for (const [i, sgn] of [[Q_LAMP_L, -1], [Q_LAMP_R, 1]]) {
     setQuad(i, fx2a(WHEEL_X + sgn * LAMP_DX), fy2a(LAMP_Y),
             -fw2a(LAMP_W_F) * 0.5, -fy2a(LAMP_H_F) * 0.5,
@@ -1338,6 +1780,30 @@ export function buildCockpit(o = {}) {
   // centre, so the quad has to be that much bigger than the rim it draws.
   const whlHalf = (WHEEL_R * AH) * (0.5 / 0.468);
   setQuad(Q_WHEEL, fx2a(WHEEL_X), fy2a(WHEEL_Y), -whlHalf, -whlHalf, whlHalf, whlHalf);
+
+  // THE COUNTDOWN, one worked-out quad per cell, all four settled at boot so
+  // that showing one is four UVs, four corners and a place — sixteen floats and
+  // twelve, four times in three seconds — and no arithmetic on a live frame.
+  //
+  // EACH IS PINNED BY THE FOOT OF ITS INK, not by its cell: a 3 and a GO have
+  // different amounts of blank canvas under them, and a countdown that shuffles
+  // up and down as it counts is a countdown that draws attention to its own
+  // machinery. The ink stands on DASH_TOP at the middle of the frame, sunk
+  // CD_FEET into the dashboard so it is standing on the scuttle rather than
+  // balancing on it.
+  {
+    const feet = fy2a(DASH_TOP(CD_FX) + CD_FEET);
+    const cap = CD_CAP * AH;
+    const mir = flip ? -1 : 1;
+    for (const c of CD_CELL) {
+      const s = cap / c.ink.h;                       // art px per atlas px
+      c.hw = c.w * 0.5 * s; c.hh = c.h * 0.5 * s;
+      c.px = fx2a(CD_FX) - mir * ((c.ink.left + c.ink.right + 1) * 0.5 - c.w * 0.5) * s;
+      c.py = feet - ((c.ink.bot + 1) - c.h * 0.5) * s;
+      c.u0 = c.x / ATLAS_W; c.u1 = (c.x + c.w) / ATLAS_W;
+      c.v0 = 1 - c.y / ATLAS_H; c.v1 = 1 - (c.y + c.h) / ATLAS_H;
+    }
+  }
 
   // -------------------------------------------------------------- buffers
   const pos = new Float32Array(NQ * 4 * 3);
@@ -1492,6 +1958,10 @@ export function buildCockpit(o = {}) {
   let needleA = -NEEDLE_SWEEP, needleB = -NEEDLE_SWEEP;
   let lastW = 9, lastA = 9, lastB = 9;
   let lampL = -1, lampR = -1, gearShown = -1, gearLow = -1;
+  // The clock's last shown state, so a frame where nothing ticked writes
+  // nothing. Four digits and a tag; -1 means "not yet drawn".
+  const lcdShown = new Int8Array(4).fill(-1);
+  let tagShown = -1, cdShown = -2;
 
   /** Tint one quad's four corners. The lamps and the gear numeral all work
    *  this way: one white drawing, a colour per state, twelve floats. */
@@ -1519,9 +1989,56 @@ export function buildCockpit(o = {}) {
     uvAttr.needsUpdate = true;
   };
 
+  /**
+   * Point one clock digit at one of the ten seven-segment cells.
+   *
+   * The four digit quads all read the same strip, so a clock is four of these
+   * and no more atlas than one digit needed. -1 blanks the place by pointing
+   * it at nothing on screen — see setLcdLit, which does it with a tint instead,
+   * because a tint is twelve floats and a blank cell would be eleven cells.
+   */
+  const setDigit = (place, n) => {
+    const k = n < 0 ? 0 : n > SEG_N - 1 ? SEG_N - 1 : n;
+    const x0 = SEG_X + k * SEG_STRIDE;
+    const u0 = x0 / ATLAS_W, u1 = (x0 + SEG_W) / ATLAS_W;
+    const b = (Q_LCD0 + place) * 8;
+    uv[b] = u0; uv[b + 2] = u1; uv[b + 4] = u1; uv[b + 6] = u0;
+    uvAttr.needsUpdate = true;
+  };
+
+  /**
+   * Show one of the countdown's cells, or nothing at all.
+   *
+   * NOTHING AT ALL IS A COLLAPSED QUAD, not a blank cell and not a transparent
+   * tint: the corners go to zero, the two triangles have no area, and the
+   * rasteriser walks straight past them. It is twelve floats written twice a
+   * race — once when the lights go out and once when the next race is armed.
+   */
+  const setCount = (k) => {
+    if (k < 0) {
+      setQuad(Q_COUNT, 0, 0, 0, 0, 0, 0);
+      placeQuad(Q_COUNT, 0);
+      posAttr.needsUpdate = true;
+      return;
+    }
+    const c = CD_CELL[k];
+    const b = Q_COUNT * 8;
+    uv[b] = c.u0; uv[b + 1] = c.v0;
+    uv[b + 2] = c.u1; uv[b + 3] = c.v0;
+    uv[b + 4] = c.u1; uv[b + 5] = c.v1;
+    uv[b + 6] = c.u0; uv[b + 7] = c.v1;
+    uvAttr.needsUpdate = true;
+    setQuad(Q_COUNT, c.px, c.py, -c.hw, -c.hh, c.hw, c.hh);
+    placeQuad(Q_COUNT, 0);
+    posAttr.needsUpdate = true;
+  };
+
   paintQuad(Q_LAMP_L, LAMP_OFF);
   paintQuad(Q_LAMP_R, LAMP_OFF);
   paintQuad(Q_GEAR, GEAR_LIT);
+  for (let k = 0; k < 4; k++) paintQuad(Q_LCD0 + k, LCD_LIT);
+  paintQuad(Q_TAG, LCD_DIM);
+  setCount(-1);
 
   /**
    * Called once per frame, before rendering.
@@ -1621,6 +2138,93 @@ export function buildCockpit(o = {}) {
     if (st !== lampR) {
       lampR = st;
       paintQuad(Q_LAMP_R, st === 2 ? LAMP_BRAKE : st === 1 ? LAMP_BOOST : LAMP_OFF);
+    }
+
+    // ---- the race: the clock on the radio and the lights on the dash --------
+    //
+    // WHAT THE GLASS SHOWS, AND WHEN. A lap timer that only ever shows the
+    // clock wastes the two moments the driver has time to read anything.
+    //
+    //   on the grid, and through the countdown   the personal best, BEST lit.
+    //       This is the one time in a race when there is nothing to look at
+    //       and everything to decide, and it is the only moment the number
+    //       you are chasing is any use to you.
+    //   racing                                   the clock, BEST dark
+    //   the first three seconds after the line   what you just did
+    //   the last three                           the best again, BEST lit,
+    //       so the six seconds before the next countdown say both numbers
+    //       without either of them flickering.
+    //
+    // AND A NEW BEST BLINKS. The two numbers are the same number on the run
+    // that sets one, so alternating them would show no change at all at the
+    // one moment something happened. A readout that flashes is what every
+    // machine with a seven-segment display on it does when it wants you to
+    // look, it needs no word and no colour the panel does not already have,
+    // and it costs a tint on one quad twice a second.
+    const r = s.race;
+    let showT = 0, tagOn = 0;
+    if (r) {
+      if (r.state === 'racing') {
+        showT = r.elapsed;
+      } else if (r.state === 'done') {
+        // WHETHER THIS RUN IS THE BEST IS ASKED OF THE TIME, NOT OF race.fresh.
+        // main.js sets `fresh` when EITHER the time or the top speed is a
+        // record, so a run that was slower than your best but faster through
+        // one corner comes back fresh — and the readout would then have
+        // blinked BEST at a time that is not the best, which is a readout
+        // telling a lie in the one state it exists for. Comparing the two
+        // numbers cannot be wrong about it.
+        if (r.best != null && r.elapsed <= r.best + 1e-6) {
+          showT = r.elapsed;
+          // Once a second, lit for six tenths of it. Faster than that on a
+          // display this size is a fault light rather than a celebration, and
+          // it is also too fast to photograph honestly: a harness that has to
+          // hit a 0.26-second window to catch the dark half of a blink will
+          // sooner or later report a blink that has stopped working.
+          tagOn = (r.t % 1) < 0.6 ? 1 : 0;
+        } else if (r.t >= 3 && r.best != null) {
+          showT = r.best; tagOn = 1;
+        } else {
+          showT = r.elapsed;
+        }
+      } else if (r.best != null) {
+        showT = r.best; tagOn = 1;
+      }
+    }
+    // Split into places arithmetically. No string, no toFixed, no allocation:
+    // this runs sixty times a second for the whole race.
+    let cs = showT > 0 ? (showT * 10 + 0.0001) | 0 : 0;
+    if (cs > 5999 * 10 + 9) cs = 5999 * 10 + 9;      // the glass holds 9:59.9
+    const tenths = cs % 10;
+    const secs = ((cs / 10) | 0) % 60;
+    const mins = (cs / 600) | 0;
+    if (mins !== lcdShown[0]) { lcdShown[0] = mins; setDigit(0, mins); }
+    const s10 = (secs / 10) | 0;
+    if (s10 !== lcdShown[1]) { lcdShown[1] = s10; setDigit(1, s10); }
+    const s01 = secs % 10;
+    if (s01 !== lcdShown[2]) { lcdShown[2] = s01; setDigit(2, s01); }
+    if (tenths !== lcdShown[3]) { lcdShown[3] = tenths; setDigit(3, tenths); }
+    if (tagOn !== tagShown) { tagShown = tagOn; paintQuad(Q_TAG, tagOn ? LCD_LIT : LCD_DIM); }
+
+    // THE LIGHTS. Cell 0 is the 3, cell 2 the 1, cell 3 the GO, and each
+    // numeral holds for a third of whatever main.js says the countdown is —
+    // read off race.countdown rather than assumed, because a countdown that
+    // is retuned to four seconds must not leave the 1 on screen for two of
+    // them. GO holds for CD_HOLD into the race and then the quad collapses.
+    let cell = -1;
+    if (r) {
+      if (r.state === 'countdown') {
+        const per = (r.countdown > 0 ? r.countdown : 3.2) / CD_N;
+        const n = Math.ceil((r.countdown - r.t) / per);
+        cell = CD_N - (n < 1 ? 1 : n > CD_N ? CD_N : n);
+      } else if (r.state === 'racing' && r.t < CD_HOLD) {
+        cell = CD_N;
+      }
+    }
+    if (cell !== cdShown) {
+      cdShown = cell;
+      setCount(cell);
+      if (cell >= 0) paintQuad(Q_COUNT, cell === CD_N ? CD_GO : CD_WAIT);
     }
   };
 

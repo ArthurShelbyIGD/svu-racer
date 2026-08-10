@@ -1,0 +1,11 @@
+# Keep LF line endings in the working tree as well as in the repository.
+#
+# Without this, Git for Windows checks these files out as CRLF and converts
+# them back to LF on commit — so every time a tarball rewrites them with LF it
+# has to convert every file again, and warns about every file it will convert,
+# whether or not that file changed. Reproduced with core.autocrlf=true: two
+# files rewritten, one actually different, two warnings.
+#
+# Nothing here is hand-edited on Windows, so LF everywhere costs nothing and
+# the working tree matches what the build produces byte for byte.
+* text=auto eol=lf

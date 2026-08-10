@@ -164,6 +164,17 @@
   <button id="bTog">TOGGLE</button>
   <button id="bSlow">GEAR &minus;</button>
   <button id="bFast">GEAR +</button>
+  <!-- SOUND IS A PLAYER CONTROL, NOT A DEV ONE. A tester in a quiet room, or
+       one recording a screen capture, has to be able to silence it without
+       first discovering that TOGGLE exists — so it sits with CENTRE and GEAR
+       rather than behind the panel. It spans both columns because the player
+       half is otherwise an even six and a seventh button would leave a hole.
+       The label is the state, not the action ("SOUND ON" means it is on), and
+       the choice survives a reload, because reloading is the most common thing
+       a tester does and being blasted again each time is how a mute button
+       gets reported as broken. Wired in src/audio.js; 'M' does the same for a
+       desktop and for the harnesses. -->
+  <button id="bMute" class="wide">SOUND ON</button>
   <button id="bDown" class="dev">SCENERY −</button>
   <button id="bUp" class="dev">SCENERY +</button>
   <button id="bPixDown" class="dev">PIXELS &minus;</button>

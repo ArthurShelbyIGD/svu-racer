@@ -38,6 +38,9 @@ import { buildGantry } from './world/gantry.js';
 // pedal and the boost bottle, and the picture and the hit test have to be the
 // same two numbers. See the note on them in cockpit.js.
 import { buildCockpit, PEDAL_TOP, PEDAL_W } from './car/cockpit.js';
+// The voice. Whole feature in one file; it makes no AudioContext until
+// firstGesture() calls resume(), and wires its own MUTE button. See src/audio.js.
+import { audio } from './audio.js';
 
 // ---------------------------------------------------------------- constants
 
@@ -2524,6 +2527,7 @@ function firstGesture() {
   // Anthony's phone came back "refused: TypeError" and stayed windowed for the
   // rest of the session with no way to retry short of reloading.
   if (!askedTilt) { askedTilt = true; askTilt(); }
+  audio.resume();   // browsers refuse audio outside a gesture; iOS starts suspended
   keepAwake();
   goFullscreen();
   // The first touch also drops the lights. Before that the car sits on the
@@ -2835,6 +2839,8 @@ function frame(now) {
   // wondering what was broken. Shifting UP stays entirely manual, because that
   // is the decision Anthony asked to be given.
   while (st.gear > 0 && st.speed < top * GEARS[st.gear - 1] * 0.45) st.gear--;
+
+  audio.update(dt, st, race, braking, boosting, tune.maxSpeed);
 
   // Can exceed 1 while boosting, deliberately: the field of view and the camera
   // both read from it, so the boost widens and pulls back without extra code.
@@ -3207,6 +3213,7 @@ window.RACER = {
   // Exposed so the checks assert against the real constants rather than
   // against numbers copied into a test file, which then drift apart.
   race, startRace,
+  audio,
   consts: { ROAD_W, STEER_RATE, BRAKE_GRIP, CORNER_AUTHORITY, SPEED_STEPS, SEG_LEN, STRAY_MAX,
             GEARS, REDLINE, MPH, RACE_FROM, RACE_LEN, COUNTDOWN, PEDAL_TOP, PEDAL_W },
 };

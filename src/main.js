@@ -2236,21 +2236,95 @@ function askTilt() {
  * the input, recomputed from scratch, every event. Braking with one thumb while
  * boosting with the other therefore works without a line of code about it.
  */
+/**
+ * THE PEDALS ARE NOT CONDITIONAL ANY MORE, and that was a serious bug.
+ *
+ * This used to read:
+ *
+ *     if (tilt.on) { if (f < 0.5) br = true; else bo = true; }
+ *     else dir = f < 0.5 ? -1 : 1;
+ *
+ * so the two halves of the screen changed job depending on whether the device
+ * had ever reported a tilt. On a phone that had not — an iPhone that was never
+ * asked for permission, a laptop, or simply a phone being held flat — every
+ * touch steered and THERE WAS NO BRAKE AND NO BOOST AT ALL. Reported from a
+ * real player as "braking doesn't work" and "boost has issues, the car just
+ * steers instead": two symptoms, one line.
+ *
+ * It is also the reason a mode like this is a bad idea in the first place. The
+ * game was unplayable and nothing on screen said so — the pedal hints sat there
+ * in the corners the whole time, labelling controls that did not exist.
+ *
+ * So: the bottom corners are the brake and the boost, always. Steering, which
+ * only matters when there is no tilt, lives in the area above them and cannot
+ * collide. The middle of the bottom strip is deliberately dead, so a thumb can
+ * rest there without doing anything.
+ *
+ * GENEROUS ON PURPOSE. Anthony: "generous amount of space around them so just
+ * touching the screen anywhere close enough will work." Forty percent of the
+ * width and forty-five percent of the height, per corner, and the on-screen
+ * hints are sized from these same two numbers at boot so the label cannot drift
+ * away from the region it is labelling.
+ */
+const PEDAL_TOP = 0.55;    // touches below this fraction of the height are pedals
+const PEDAL_W = 0.40;      // ...and within this fraction of the width, per side
+
 function readTouches(list) {
   let dir = 0, br = false, bo = false;
-  const w = window.innerWidth;
+  const w = window.innerWidth, h = window.innerHeight;
   for (let i = 0; list && i < list.length; i++) {
-    const f = list[i].clientX / w;
-    if (tilt.on) { if (f < 0.5) br = true; else bo = true; }
-    else dir = f < 0.5 ? -1 : 1;
+    const fx = list[i].clientX / w, fy = list[i].clientY / h;
+    if (fy > PEDAL_TOP) {
+      if (fx < PEDAL_W) br = true;
+      else if (fx > 1 - PEDAL_W) bo = true;
+    } else {
+      dir = fx < 0.5 ? -1 : 1;
+    }
   }
   touchDir = dir; pedal.brake = br; pedal.boost = bo;
 }
 
+/** Make the hints describe the hit test exactly, rather than approximately. */
+function sizePedalHints() {
+  for (const id of ['pL', 'pR']) {
+    const e = document.getElementById(id);
+    if (!e) continue;
+    e.style.width = (PEDAL_W * 100) + '%';
+    e.style.height = ((1 - PEDAL_TOP) * 100) + '%';
+    e.style.maxHeight = 'none';
+  }
+}
+sizePedalHints();
+
+/**
+ * THE FIRST TOUCH ANYWHERE ASKS, not the first touch on the canvas.
+ *
+ * iOS only offers the motion-permission dialog from inside a real gesture, and
+ * this used to be wired to the canvas alone — while the control buttons
+ * deliberately call stopPropagation so steering does not fire underneath them.
+ * Since the throttle is always on and the car drives itself, it was entirely
+ * possible to open the page, press TOGGLE, take a screenshot and reach 95mph
+ * having never once touched the middle of the screen. No canvas touch, no
+ * prompt, no tilt — which is exactly what happened on the first iPhone this
+ * was given to, and it looked like the phone refusing rather than us not asking.
+ *
+ * Listening on the document in the CAPTURE phase is what makes it reliable: the
+ * capture phase runs top-down before the target's own handlers, so a button
+ * swallowing the event afterwards cannot stop the request going out.
+ */
 let askedTilt = false;
+function firstGesture() {
+  if (askedTilt) return;
+  askedTilt = true;
+  askTilt();
+  keepAwake();
+  goFullscreen();
+}
+document.addEventListener('touchstart', firstGesture, { capture: true, passive: true });
+document.addEventListener('mousedown', firstGesture, { capture: true, passive: true });
+
 const onTouch = (e) => {
-  if (!askedTilt) { askedTilt = true; askTilt(); }
-  // A real gesture is the only moment either of these is reliably granted.
+  firstGesture();
   keepAwake();
   if (e.type === 'touchstart') goFullscreen();
   readTouches(e.touches);
@@ -2264,7 +2338,7 @@ canvas.addEventListener('touchcancel', onTouch, { passive: false });
 
 // Mouse, for the laptop. Steering only — a laptop has a keyboard for the rest.
 const onMouse = (down) => (e) => {
-  if (!askedTilt) { askedTilt = true; askTilt(); keepAwake(); }
+  firstGesture();
   touchDir = down ? (e.clientX / window.innerWidth < 0.5 ? -1 : 1) : 0;
 };
 window.addEventListener('keydown', (e) => { if (e.code === 'KeyF') goFullscreen(); });

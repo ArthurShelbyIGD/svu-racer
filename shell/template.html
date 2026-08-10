@@ -14,7 +14,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="screen-orientation" content="landscape">
 <link rel="manifest" href='data:application/manifest+json,{"name":"Racer","short_name":"Racer","display":"fullscreen","orientation":"landscape","background_color":"%230b0d14","theme_color":"%230b0d14","start_url":"."}'>
-<title>Racer — skeleton</title>
+<title>Racer</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; }
   html, body {
@@ -97,13 +97,18 @@
      are only useful next to the dials that change them. */
   body.lean #hud, body.lean #ctl .dev { display: none; }
 
-  /* PEDAL HINTS. Not buttons — the whole bottom-left and bottom-right of the
-     screen is live, because a thumb on a moving phone does not hit a target.
-     These are just labels saying where, and they never take a touch
-     themselves (pointer-events:none) or they would swallow the input. */
+  /* PEDAL HINTS. Not buttons — a wide region of the screen is live, because a
+     thumb on a moving phone does not hit a target. These are labels saying
+     where, and they never take a touch themselves (pointer-events:none) or
+     they would swallow the very input they are advertising.
+     THE SIZE IS SET FROM JAVASCRIPT at boot, from the same two constants the
+     hit test uses. It was written here as 33% by 40% while the hit test used
+     the whole left or right HALF of the screen — a hint that described a
+     different shape from the thing it was hinting at. One source of truth now;
+     the numbers here are only a fallback if the script never runs. */
   .pedal {
     position: fixed; bottom: max(8px, env(safe-area-inset-bottom));
-    width: 33%; height: 40%; max-height: 190px;
+    width: 40%; height: 45%;
     display: flex; align-items: flex-end; justify-content: center;
     padding-bottom: 6px;
     font-size: 12px; letter-spacing: 0.14em; color: #ffffff30;

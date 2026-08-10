@@ -1870,6 +1870,27 @@ const DEV = window.__DEVICE || { build: '?', renderer: '?', vendor: '?', webgl: 
                                  screen: '?', dpr: 1, maxTex: 0, ua: navigator.userAgent };
 
 const fpsEl = document.getElementById('fps');
+/**
+ * Wrap a long value to a fixed column count with a hanging indent, so the
+ * readout's right-hand column has a WIDTH WE CHOSE rather than one the flex
+ * layout negotiates. A GPU string is 68 characters and the panel is not; left
+ * to the browser it either pushed the column wide enough to run under the
+ * buttons or got squeezed into a tower, depending on the screen.
+ */
+const FIELD_COLS = 30;
+function wrapField(label, value) {
+  const pad = ' '.repeat(12);
+  const words = String(value).split(' ');
+  const lines = [];
+  let line = '';
+  for (const w of words) {
+    if (line && (line + ' ' + w).length > FIELD_COLS) { lines.push(line); line = w; }
+    else line = line ? line + ' ' + w : w;
+  }
+  if (line) lines.push(line);
+  return lines.map((l, i) => (i === 0 ? label.padEnd(12) : pad) + l).join('\n') + '\n';
+}
+
 /** "Chrome 141 on Android 11" out of 110 characters of user-agent boilerplate. */
 function shortAgent(ua) {
   const b = ua.match(/(Edg|OPR|SamsungBrowser|CriOS|FxiOS|Chrome|Firefox|Version)\/(\d+)/);
@@ -2158,6 +2179,7 @@ function lockLandscape() {
   if (so && so.lock) { try { so.lock('landscape').catch(() => {}); } catch (e) {} }
 }
 
+const why2 = (e) => 'refused: ' + ((e && (e.message || e.name)) || 'error');
 function goFullscreen() {
   const el = document.documentElement;
   const req = el.requestFullscreen || el.webkitRequestFullscreen;
@@ -2165,11 +2187,14 @@ function goFullscreen() {
   if (document.fullscreenElement || document.webkitFullscreenElement) return;
   try {
     const p = req.call(el, { navigationUI: 'hide' });
-    if (p && p.then) p.then(lockLandscape).catch((e) => {
-      fs.state = 'refused: ' + ((e && e.name) || 'error');
-    });
+    // REPORT THE MESSAGE, NOT JUST THE NAME. "refused: TypeError" is what came
+    // back from a real phone and it narrows the cause to nothing at all — every
+    // interesting fullscreen rejection in Chrome is a TypeError. The message
+    // says which one, and a screenshot is the only way I get to see it.
+    const why = (e) => 'refused: ' + ((e && (e.message || e.name)) || 'error');
+    if (p && p.then) p.then(lockLandscape).catch((e) => { fs.state = why(e); });
     else lockLandscape();
-  } catch (e) { fs.state = 'refused: ' + ((e && e.name) || 'error'); }
+  } catch (e) { fs.state = why2(e); }
 }
 
 const onFsChange = () => {
@@ -2361,9 +2386,13 @@ sizePedalHints();
  */
 let askedTilt = false;
 function firstGesture() {
-  if (askedTilt) return;
-  askedTilt = true;
-  askTilt();
+  // ASK ONCE, but KEEP TRYING for the other two. iOS offers the motion dialog
+  // exactly once, so asking twice is pointless; fullscreen and the wake lock
+  // can be refused for reasons that go away — and if the only thing a player
+  // ever touches is a button, a single attempt was the only attempt they got.
+  // Anthony's phone came back "refused: TypeError" and stayed windowed for the
+  // rest of the session with no way to retry short of reloading.
+  if (!askedTilt) { askedTilt = true; askTilt(); }
   keepAwake();
   goFullscreen();
 }
@@ -2990,15 +3019,15 @@ function frame(now) {
       `build       ${DEV.build}\n` +
       `WebGL       ${DEV.webgl}   maxtex ${DEV.maxTex}\n` +
       `screen      ${DEV.screen} at dpr ${DEV.dpr}\n` +
-      `GPU         ${DEV.renderer}\n` +
-      `vendor      ${DEV.vendor}\n` +
+      wrapField('GPU', DEV.renderer) +
+      wrapField('vendor', DEV.vendor) +
       // A SHORT BROWSER AND OS RATHER THAN THE RAW AGENT. The full string is 110
       // characters of boilerplate that wraps to five lines in a narrow column,
       // and now that the GPU is named outright it is the least informative
       // thing on the panel. It is still on window.__DEVICE in full, and the
       // failure screen still prints it whole — that is the moment it earns its
       // space, because a page that would not start has no other clues.
-      `browser     ${shortAgent(DEV.ua)}`;
+      wrapField('browser', shortAgent(DEV.ua)).replace(/\n$/, '');
     worst = 0;
     drawn = 0; simmed = 0;
   }

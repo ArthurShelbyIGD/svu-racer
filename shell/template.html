@@ -56,19 +56,23 @@
      you drive goes left; what IDENTIFIES the run goes right, so a screenshot
      carries both and neither has to be scrolled to. */
   #hcols { display: flex; gap: 18px; align-items: flex-start; }
-  /* NARROW SCREENS GO BACK TO ONE COLUMN. Two columns need about 500px of text
-     width and a 640px phone only has 444 once the buttons are allowed for, so
-     forcing them there wrapped the right-hand column into a 606px-tall tower —
-     twice the height the single column it replaced would have been. Measured,
-     not guessed: tools/hudfit.mjs caught it on the 640x320 case. Below the
-     threshold, stack them and drop the type instead. */
-  @media (max-width: 700px) {
-    #hcols { display: block; }
-    #hud { font-size: 9.5px; line-height: 1.35; }
-    #fps { font-size: 24px; }
-  }
-  #stats { white-space: pre; }
-  #stats2 { white-space: pre-wrap; word-break: break-word; }
+  /* THE TYPE IS SIZED FROM THE SPACE THERE ACTUALLY IS, not from a breakpoint.
+     Two columns of `pre` text need about 92 characters across, and what is
+     available is the viewport less the button grid and the padding — so the
+     font size that fits is (100vw - 220px) / 92 / 0.6, which is the calc
+     below. A breakpoint could only ever be right on one side of itself: at 700
+     it left the columns colliding, and once that was fixed it left them 56px
+     into the buttons at 720. An expression cannot be wrong on one screen and
+     right on the next. */
+  #hud { font-size: clamp(7px, calc((100vw - 220px) / 55), 11px); line-height: 1.4; }
+  /* BOTH COLUMNS ARE `pre` AND NEITHER SHRINKS. Letting the right one wrap
+     looked flexible and was the opposite: as a flex item with a wrappable
+     white-space it had almost no minimum width, so the left column took what
+     it wanted and squeezed the right one to 110px — six lines of text became a
+     twenty-one line tower 335px tall. Long values are now wrapped in
+     JavaScript at a known column count, so both widths are predictable and
+     the layout cannot be renegotiated behind my back. */
+  #stats, #stats2 { white-space: pre; flex: 0 0 auto; }
   #fps { font-size: 30px; font-weight: 700; letter-spacing: 0; }
   .lo { color: #ff6b5e; }
   .mid { color: #ffcc55; }

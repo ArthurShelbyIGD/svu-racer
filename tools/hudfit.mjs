@@ -18,6 +18,11 @@ const PAGE = 'file://' + __j(ROOT, 'docs', 'index.html');
 // and therefore the one that matters; the rest bracket what a Discord will send.
 const SCREENS = [
   { name: "Anthony's phone", w: 720, h: 360 },
+  // The shape a tester actually meets FIRST: the page in a browser tab with
+  // the address bar still there, before anything has gone fullscreen. 1344x560
+  // at dpr 2. This is where the columns collided and no screen in the list
+  // covered it.
+  { name: 'his phone, windowed', w: 672, h: 280 },
   { name: 'small phone',     w: 640, h: 320 },
   { name: 'iPhone-ish',      w: 844, h: 390 },
   { name: 'old tablet',      w: 1024, h: 600 },
@@ -56,26 +61,42 @@ for (const s of SCREENS) {
       range.selectNodeContents(el);
       for (const rect of range.getClientRects()) textRight = Math.max(textRight, rect.right);
     }
+    // DO THE TWO COLUMNS COLLIDE WITH EACH OTHER? The previous version asked
+    // only whether the panel fitted the screen and cleared the buttons, and
+    // passed a layout in which the right-hand column was written straight
+    // through the left one — because #stats and #stats2 are SPANS, so setting
+    // their parent to display:block on a narrow screen left them flowing
+    // inline. It looked like "canvas 1344x560build 2a4371a" on a real phone
+    // and the rig called it a fit. Fitting and being readable are not the same
+    // claim, and only one of them was being tested.
+    const A = document.getElementById('stats').getBoundingClientRect();
+    const B = document.getElementById('stats2').getBoundingClientRect();
+    const collide = !(B.left >= A.right - 0.5 || A.left >= B.right - 0.5
+                   || B.top >= A.bottom - 0.5 || A.top >= B.bottom - 0.5);
     return { bottom: Math.ceil(r.bottom), right: Math.ceil(textRight),
              ctlLeft: Math.floor(c.left), ctlBottom: Math.ceil(c.bottom),
-             vh: window.innerHeight, vw: window.innerWidth,
+             vh: window.innerHeight, vw: window.innerWidth, collide,
              clipped: h.scrollHeight > h.clientHeight + 1 };
   });
   const overV = m.bottom - m.vh;
   const overH = m.right - Math.min(m.vw, m.ctlLeft);
-  const ok = overV <= 0 && overH <= 0 && !m.clipped;
+  const ok = overV <= 0 && overH <= 0 && !m.clipped && !m.collide;
   if (!ok) bad++;
   console.log(`  ${s.name.padEnd(20)} ${String(m.vw).padStart(5)}x${String(m.vh).padEnd(4)}` +
               ` ${String(m.right).padStart(5)}x${String(m.bottom).padEnd(4)}` +
               `  buttons at ${String(m.ctlLeft).padStart(4)}  ` +
-              `${ok ? 'fits' : `OVER by ${Math.max(overV, 0)}px down, ${Math.max(overH, 0)}px into the buttons`}`);
+              `${ok ? 'fits' : m.collide ? 'COLUMNS COLLIDE'
+                : `OVER by ${Math.max(overV, 0)}px down, ${Math.max(overH, 0)}px into the buttons`}`);
   await page.close();
 }
 
-// AND PROVE THE TEST CAN FAIL. A fit check that has only ever seen a layout
-// that fits is an untested test — it would pass just as happily if it were
-// measuring the wrong element, or nothing at all. So put the old styling back
-// by hand on the screen that broke, and require it to be caught.
+// AND PROVE THE TEST CAN FAIL — against the fault that actually reached a
+// phone, not a historical one. This used to re-apply an old font size and
+// require the overflow to be caught; once the content changed, that layout
+// stopped overflowing and the self-check quietly started passing while
+// proving nothing. So it now recreates the COLLISION: spans left inline
+// inside a block parent, which is what wrote the right-hand column straight
+// through the left one on Anthony's windowed phone.
 {
   const page = await browser.newPage({ viewport: { width: 720, height: 360 } });
   await page.goto(PAGE, { waitUntil: 'load' });
@@ -84,18 +105,19 @@ for (const s of SCREENS) {
     window.RACER.renderer.setPixelRatio(0.5);
     document.getElementById('bTog').click();
     const st = document.createElement('style');
-    st.textContent = '#hud{font-size:13px;line-height:1.5}#hcols{display:block}';
+    st.textContent = '#hcols{display:block}#stats,#stats2{display:inline}';
     document.head.appendChild(st);
   });
   await page.waitForTimeout(900);
   const m = await page.evaluate(() => {
-    const r = document.getElementById('hud').getBoundingClientRect();
-    return { bottom: Math.ceil(r.bottom), vh: window.innerHeight };
+    const A = document.getElementById('stats').getBoundingClientRect();
+    const B = document.getElementById('stats2').getBoundingClientRect();
+    return { collide: !(B.left >= A.right - 0.5 || A.left >= B.right - 0.5
+                     || B.top >= A.bottom - 0.5 || A.top >= B.bottom - 0.5) };
   });
-  const over = m.bottom - m.vh;
-  console.log(`  the layout that shipped, on the same screen: ${m.bottom}px of ${m.vh}px` +
-              `  ->  ${over > 0 ? `OVER by ${over}px, correctly caught` : 'NOT CAUGHT — this test is blind'}`);
-  if (over <= 0) bad++;
+  console.log(`  the collision that shipped, forced back on the same screen:  ->  ` +
+              (m.collide ? 'CAUGHT, correctly' : 'NOT CAUGHT — this test is blind'));
+  if (!m.collide) bad++;
   await page.close();
 }
 

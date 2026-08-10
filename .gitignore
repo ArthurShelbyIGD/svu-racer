@@ -1,0 +1,6 @@
+# Build output is COMMITTED in this repo, deliberately — GitHub Pages serves
+# docs/ and there is no build step on GitHub's side, so docs/index.html is the
+# published game rather than an artifact to be regenerated.
+node_modules/
+shots/
+*.tgz

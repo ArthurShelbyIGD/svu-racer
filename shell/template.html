@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#0b0d14">
+<!-- ADDED TO THE HOME SCREEN, this launches with no browser chrome at all —
+     no address bar to hide, because there is no address bar. The manifest is a
+     data: URL so the "one self-contained file" rule survives; Chrome accepts
+     that, and anything that does not simply ignores it and falls back to the
+     Fullscreen API, which is what the first touch asks for anyway. -->
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="screen-orientation" content="landscape">
+<link rel="manifest" href='data:application/manifest+json,{"name":"Racer","short_name":"Racer","display":"fullscreen","orientation":"landscape","background_color":"%230b0d14","theme_color":"%230b0d14","start_url":"."}'>
+<title>Racer — skeleton</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: #0b0d14; color: #e8e6df;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    /* Stops the browser from scrolling, rubber-banding or firing a
+       double-tap-to-zoom delay on every touch. Without this a phone adds
+       ~300ms to the first tap of every gesture. */
+    touch-action: none; overscroll-behavior: none;
+    -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #c { display: block; width: 100%; height: 100%; }
+
+  /* ---- the readout ----
+     This is the entire point of the skeleton. It has to be legible on a small
+     bright screen at arm's length, so it is large and high-contrast rather
+     than tasteful. It goes when the numbers are known. */
+  #hud {
+    /* RIGHT-INSET PAST THE BUTTONS. Making the readout fit the viewport was
+       only half the problem: the second column then ran underneath the control
+       grid and was unreadable in exactly the screenshot it exists for. The
+       first fit test measured the panel against the WINDOW and passed it while
+       this was happening — an instrument that checks one edge and not the
+       other. 196px is the grid at its widest (two 82px buttons, a 6px gap and
+       its 8px right offset) plus a little air. */
+    position: fixed; top: 0; left: 0; right: 196px;
+    padding: max(10px, env(safe-area-inset-top)) 12px 10px 12px;
+    /* 11px, NOT 13. Measured on Anthony's phone: a 1440x720 canvas at dpr 2.00
+       is a 360px-tall CSS viewport, and eighteen lines at 13px came to about
+       416px — so the device line clipped mid-word and the two most useful lines
+       in a stranger's screenshot were the two below the fold. */
+    font-size: 11px; line-height: 1.45; letter-spacing: 0.02em;
+    background: linear-gradient(#000b, #0000);
+    pointer-events: none;
+  }
+  /* TWO COLUMNS, because the panel exists to be photographed. What CHANGES as
+     you drive goes left; what IDENTIFIES the run goes right, so a screenshot
+     carries both and neither has to be scrolled to. */
+  #hcols { display: flex; gap: 18px; align-items: flex-start; }
+  /* NARROW SCREENS GO BACK TO ONE COLUMN. Two columns need about 500px of text
+     width and a 640px phone only has 444 once the buttons are allowed for, so
+     forcing them there wrapped the right-hand column into a 606px-tall tower —
+     twice the height the single column it replaced would have been. Measured,
+     not guessed: tools/hudfit.mjs caught it on the 640x320 case. Below the
+     threshold, stack them and drop the type instead. */
+  @media (max-width: 700px) {
+    #hcols { display: block; }
+    #hud { font-size: 9.5px; line-height: 1.35; }
+    #fps { font-size: 24px; }
+  }
+  #stats { white-space: pre; }
+  #stats2 { white-space: pre-wrap; word-break: break-word; }
+  #fps { font-size: 30px; font-weight: 700; letter-spacing: 0; }
+  .lo { color: #ff6b5e; }
+  .mid { color: #ffcc55; }
+  .ok { color: #7ee081; }
+  /* Test controls live TOP-RIGHT, deliberately away from where the thumbs go.
+     The bottom corners are the brake and the boost now, and a test button you
+     hit while braking is a test button in the wrong place. */
+  #ctl {
+    position: fixed; right: 8px; top: max(8px, env(safe-area-inset-top));
+    display: grid; grid-template-columns: repeat(2, auto);
+    gap: 6px; z-index: 5;
+  }
+  #ctl button {
+    font: inherit; font-size: 11px; letter-spacing: 0.04em;
+    min-width: 82px; min-height: 40px; padding: 0 8px;
+    color: #e8e6df; background: #171a2bdd;
+    border: 1px solid #ffffff2e; border-radius: 6px;
+    -webkit-appearance: none; appearance: none; cursor: pointer;
+    touch-action: manipulation;
+  }
+  #ctl button:active { background: #2a3550ee; }
+  #ctl .wide { grid-column: span 2; }
+  /* LEAN IS THE DEFAULT, so a tester who opens the file sees a game rather than
+     a diagnostic screen. The readout and the instrument buttons are hidden
+     together, because half a HUD is worse than either whole one — the numbers
+     are only useful next to the dials that change them. */
+  body.lean #hud, body.lean #ctl .dev { display: none; }
+
+  /* PEDAL HINTS. Not buttons — the whole bottom-left and bottom-right of the
+     screen is live, because a thumb on a moving phone does not hit a target.
+     These are just labels saying where, and they never take a touch
+     themselves (pointer-events:none) or they would swallow the input. */
+  .pedal {
+    position: fixed; bottom: max(8px, env(safe-area-inset-bottom));
+    width: 33%; height: 40%; max-height: 190px;
+    display: flex; align-items: flex-end; justify-content: center;
+    padding-bottom: 6px;
+    font-size: 12px; letter-spacing: 0.14em; color: #ffffff30;
+    border-radius: 14px; pointer-events: none; z-index: 4;
+  }
+  #pL { left: 0; border-left: none;
+        background: linear-gradient(to top right, #ff6b5e14, #0000 62%); }
+  #pR { right: 0;
+        background: linear-gradient(to top left, #6de3c81c, #0000 62%); }
+
+  /* THE FAILURE PANEL. A black screen is the worst bug report there is: the
+     tester says "it didn't work", and that one sentence covers a device too old
+     for WebGL2, a half-finished download, and a mistake I made an hour ago.
+     This turns all three into different sentences. */
+  #fail { display: none; position: fixed; inset: 0; z-index: 99;
+    background: #0b0d14; color: #e8e6df; padding: 18px;
+    font-size: 13px; line-height: 1.6; overflow: auto; white-space: pre-wrap;
+    word-break: break-word; }
+  #fail b { color: #ff6b5e; font-size: 16px; }
+  #note { position: fixed; left: 0; right: 0; bottom: 0;
+    padding: 10px 12px max(10px, env(safe-area-inset-bottom)) 12px;
+    font-size: 12px; color: #8a8b93; text-align: center;
+    background: linear-gradient(#0000, #000b); pointer-events: none; }
+</style>
+</head>
+<body class="lean">
+<canvas id="c"></canvas>
+<div id="hud"><div><span id="fps">--</span> FPS</div>
+<div id="hcols"><span id="stats"></span><span id="stats2"></span></div></div>
+<div id="pL" class="pedal">BRAKE</div>
+<div id="pR" class="pedal">BOOST</div>
+<div id="fail"></div>
+<div id="note">first touch goes fullscreen · tilt to steer · hold bottom-left to BRAKE, bottom-right to BOOST</div>
+
+<!-- THE CONTROLS, IN TWO LAYERS.
+     Six buttons a player has a reason to press, then the instruments behind
+     TOGGLE. Anthony is about to hand this to testers: "from a player's POV it's
+     just not needed... everything brought back with the TOGGLE button for the
+     next round of testing and data collection."
+     Order is his, and the grid is two columns, so it reads
+       CENTRE  FULL SCR / INVERT  TOGGLE / GEAR -  GEAR +
+     with the dev pairs appearing underneath. -->
+<div id="ctl">
+  <button id="bZero">CENTRE</button>
+  <button id="bFull">FULL SCR</button>
+  <button id="bInv">INVERT</button>
+  <button id="bTog">TOGGLE</button>
+  <button id="bSlow">GEAR &minus;</button>
+  <button id="bFast">GEAR +</button>
+  <button id="bDown" class="dev">SCENERY −</button>
+  <button id="bUp" class="dev">SCENERY +</button>
+  <button id="bPixDown" class="dev">PIXELS &minus;</button>
+  <button id="bPixUp" class="dev">PIXELS +</button>
+  <button id="bCapDown" class="dev">CAP &minus;</button>
+  <button id="bCapUp" class="dev">CAP +</button>
+</div>
+
+<script>
+// WHAT IS THIS DEVICE, AND DID WE SURVIVE IT? Both answers have to exist BEFORE
+// the bundle runs, because the most useful moment to know either is the moment
+// the bundle has just failed to start.
+//
+// Anthony is putting a QR code in a Discord. Every reply comes from hardware
+// neither of us has seen, and a screenshot of numbers with no record of what
+// produced them is not data.
+(function () {
+  function probe() {
+    var c = document.createElement('canvas'), gl2 = null, gl1 = null;
+    try { gl2 = c.getContext('webgl2'); } catch (e) {}
+    if (!gl2) { try { gl1 = c.getContext('webgl') || c.getContext('experimental-webgl'); } catch (e) {} }
+    var gl = gl2 || gl1, ren = '-', ven = '-', tex = 0;
+    if (gl) {
+      try {
+        // UNMASKED where the browser allows it. Plain RENDERER is often a
+        // privacy placeholder, so ask for the real one and fall back — rather
+        // than reporting the placeholder as though it were the chip.
+        var d = gl.getExtension('WEBGL_debug_renderer_info');
+        ren = String(d ? gl.getParameter(d.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+        ven = String(d ? gl.getParameter(d.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR));
+        tex = gl.getParameter(gl.MAX_TEXTURE_SIZE) | 0;
+      } catch (e) {}
+      // Hand the context back. Low-end devices cap how many live WebGL contexts
+      // they hand out, and spending one on a probe that then sits there is a
+      // way to make the real renderer fail on the device most likely to fail.
+      try { var lose = gl.getExtension('WEBGL_lose_context'); if (lose) lose.loseContext(); } catch (e) {}
+    }
+    return { webgl: gl2 ? 2 : gl1 ? 1 : 0, renderer: ren, vendor: ven, maxTex: tex };
+  }
+  var p = probe();
+  window.__DEVICE = {
+    webgl: p.webgl, renderer: p.renderer, vendor: p.vendor, maxTex: p.maxTex,
+    screen: (screen.width | 0) + 'x' + (screen.height | 0),
+    dpr: Math.round((window.devicePixelRatio || 1) * 100) / 100,
+    ua: navigator.userAgent, build: '__BUILD__'
+  };
+
+  var shown = false;
+  function fail(title, detail) {
+    if (shown) return; shown = true;
+    var d = window.__DEVICE, el = document.getElementById('fail');
+    if (!el) return;
+    el.textContent = '';
+    var b = document.createElement('b'); b.textContent = title;
+    el.appendChild(b);
+    el.appendChild(document.createTextNode(
+      '\n\n' + detail + '\n\n' +
+      'build    ' + d.build + '\n' +
+      'WebGL    ' + (d.webgl ? d.webgl : 'none') + '\n' +
+      'GPU      ' + d.vendor + ' / ' + d.renderer + '\n' +
+      'screen   ' + d.screen + ' at dpr ' + d.dpr + '\n' +
+      'max tex  ' + d.maxTex + '\n\n' + d.ua +
+      '\n\nA photo of this screen is exactly what is needed.'));
+    el.style.display = 'block';
+  }
+  window.__FAIL = fail;
+
+  // three.js 0.180 asks for a webgl2 context and nothing else, so a device
+  // without one dies inside the renderer's constructor. Say so in words rather
+  // than in a black rectangle.
+  if (p.webgl < 2) {
+    fail('This device cannot run it',
+         p.webgl === 1
+           ? 'The game needs WebGL 2 and this browser only offers WebGL 1.'
+           : 'No WebGL at all. Hardware acceleration may be switched off.');
+  }
+  window.addEventListener('error', function (e) {
+    fail('It hit an error while starting', (e && e.message) || 'unknown error');
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    fail('It hit an error while starting',
+         'unhandled rejection: ' + ((e && e.reason && e.reason.message) || e.reason || '?'));
+  });
+  // THE SILENT CASE, which is the one that catches you out: no exception, no
+  // error event, just a page that never finishes. If the game has not announced
+  // itself after eight seconds, something is wrong whether or not anything
+  // threw — a truncated download and an out-of-memory failure both look like
+  // this, and both are invisible otherwise.
+  setTimeout(function () {
+    if (!window.RACER) fail('It did not finish starting',
+      'No error was reported, but the game never came up. A partial download ' +
+      'or running out of memory both look like this.');
+  }, 8000);
+})();
+</script>
+<script>
+// GAMEPAD SHIM — MUST RUN BEFORE THE BUNDLE.
+// Some engines poll navigator.getGamepads() at startup, and in an embedded
+// context without the "gamepad" permission that call THROWS rather than
+// returning empty — killing boot before the first frame. Cost the last project
+// a shipped build that would not open in a preview pane while every test
+// passed. Make it answer honestly instead of exploding.
+(function () {
+  try { navigator.getGamepads(); } catch (e) {
+    var empty = function () { return []; };
+    try { Object.defineProperty(navigator, 'getGamepads', { value: empty, configurable: true }); }
+    catch (e2) { try { navigator.getGamepads = empty; } catch (e3) {} }
+  }
+})();
+</script>
+<script>
+/*__BUNDLE__*/
+</script>
+</body>
+</html>

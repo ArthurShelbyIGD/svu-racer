@@ -135,7 +135,9 @@ const tune = { si: 3, maxSpeed: SPEED_STEPS[3], driverX: 0, pitch: 1,
                // two silhouettes. The frame loop owns the camera, so an
                // override has to live here — setting camera.position from
                // outside lasts exactly one frame.
-               studio: null };   // swept against ref/target-high.png  // driverX set below; pitch is 0..1 so the fix can be A/B measured
+               studio: null,
+               // null to drive normally; a number pins the lateral position
+               holdX: null };   // swept against ref/target-high.png  // driverX set below; pitch is 0..1 so the fix can be A/B measured
 
 /** Multiplies the displayed number only. The physics is in world units; this
  *  is so the readout says something a driver recognises. Anthony is in the UK
@@ -178,9 +180,30 @@ const REDLINE = 0.80;
 // between driving well and driving stupidly came out at 14% — a gearbox you
 // cannot get wrong is a gearbox not worth having. An engine makes little torque
 // when it is labouring, and that is what makes an early shift a mistake.
+// THE TOP OF THE CURVE IS FLATTER THAN IT WAS, and that is the fix for a fault
+// the recovery measurement found: DOWNSHIFTING WAS THE WRONG MOVE. Recovering
+// from 75mph to 190 took 11.3s left in top gear against 12.8s starting in third,
+// which is the opposite of how a car behaves.
+//
+// The cause was this line falling to 33% of peak at the limiter. Every upshift
+// lands you at roughly 78% revs, so a car climbing back through the box spent
+// its whole time in the weak part of the curve — third gear's near-double
+// acceleration at 75mph (28.8 against 16.6) was handed straight back.
+//
+// Real engines hold far more than a third at the top, and a big lazy muscle
+// V8 least of all. Swept, with drag re-derived each time so top speed is held
+// at 202mph by construction:
+//
+//   torque at the limiter   33% (before)   top gear wins by 1.5s
+//                           55%            downshift wins by 0.5s
+//                           70% (now)      downshift wins by 1.5s
+//                           80%            downshift wins by 2.1s
+//
+// 70% makes a downshift clearly the right answer without making the box a
+// formality, and it suits the engine this car is meant to have.
 const torque = (rev) => (rev < 0.5
   ? 0.42 + 0.58 * (rev / 0.5) ** 0.8
-  : 1 - 0.67 * ((rev - 0.5) / 0.5) ** 1.4);
+  : 1 - 0.30 * ((rev - 0.5) / 0.5) ** 1.4);
 /**
  * Acceleration at full torque in TOP gear, world units per second squared.
  * Divided by the gear ratio in the loop, so first gear pulls 1/0.30 as hard —
@@ -197,6 +220,29 @@ const torque = (rev) => (rev < 0.5
  * car. I would not have found that by driving it.
  */
 const ENGINE = 20;
+/**
+ * How hard rough ground pulls you back, per second, at full stray. Applied as
+ * OFFROAD_DRAG * off * speed, so it is a fraction of your speed per second
+ * rather than a fixed number of units — see the note at the call site.
+ *
+ * 0.8 was chosen against the terminal speeds it produces rather than by feel,
+ * since "how bad should it be" is only answerable as "what does it leave you
+ * doing". tools/offroad.mjs prints those.
+ */
+const OFFROAD_DRAG = 0.17;
+/**
+ * ...and how sharply it bites as you go further off. NOT linear, which is what
+ * I wrote first and what the measurement threw out: a linear coefficient still
+ * produces a wildly non-linear result, because terminal speed solves
+ * push = drag*v^2 + k*v, and even a small k dominates at 200mph. Clipping the
+ * verge by half a unit settled the car at 81mph, down from 202. That is not a
+ * warning, it is a crash without the crash.
+ *
+ * Raising `off` to the power 1.5 puts the gentleness where a driver needs it —
+ * at the edge, where mistakes are small and constant — while keeping the far
+ * verge genuinely expensive.
+ */
+const OFFROAD_BITE = 1.5;
 
 /**
  * Seconds from a standstill to 90% of the current top speed.
@@ -2033,6 +2079,7 @@ const st = {
   // the car reached its top speed is measuring the renderer, not the physics —
   // which is exactly how two speed assertions went red on a working build.
   simT: 0,
+  off: 0,         // 0 on the tarmac, 1 at the far edge of what you can stray to
 };
 
 // ---- input ---------------------------------------------------------------
@@ -2678,6 +2725,38 @@ function frame(now) {
   // and still lets you get well off the tarmac — the road plus its rumble strip
   // ends at 10.1, so there are two units of pavement to slither along.
   st.x = clamp(st.x, -STRAY_MAX, STRAY_MAX);
+
+  // ---- OFF THE TARMAC ------------------------------------------------------
+  //
+  // Until now the edges of the road were decoration: you could sit on the
+  // pavement at 200mph and nothing happened, so there was no reason to stay
+  // between the lines and no cost to getting a corner wrong. A racing game in
+  // which leaving the track is free is a game with no track.
+  //
+  // A RETARDING FORCE PROPORTIONAL TO SPEED, not a flat deceleration, because
+  // that is what rough ground does — it costs you most when you are going
+  // fastest, and it never quite stops you, so you can always crawl back on.
+  //
+  // AND IT SCALES WITH HOW FAR OFF YOU ARE. Clipping the kerb should be a
+  // warning; putting all four wheels on the pavement should be an event.
+  // Between ROAD_W and STRAY_MAX there are 2.1 units to grade it across, so a
+  // small mistake costs a small amount. A flat penalty at the white line would
+  // make every twitch a disaster, which is the sort of thing that reads as the
+  // game being unfair rather than as the player being wrong.
+  // HOLD THE CAR AT A LATERAL OFFSET, for harnesses only. Assigning st.x from
+  // outside does not work: this loop rewrites it every frame from the steering
+  // and the corner, so an external write survives a fraction of a frame. The
+  // off-road harness tried exactly that and its control row — the car parked on
+  // the white line, where the penalty is zero by definition — came back at
+  // 161mph instead of 202. A measurement whose known-good case is wrong is not
+  // reporting on the game, and every other row it printed was worthless too.
+  if (tune.holdX !== null) st.x = tune.holdX;
+
+  st.off = Math.max(0, (Math.abs(st.x) - ROAD_W) / (STRAY_MAX - ROAD_W));
+  if (st.off > 0 && !tune.freeze) {
+    st.speed -= OFFROAD_DRAG * (st.off ** OFFROAD_BITE) * st.speed * dt;
+    if (st.speed < 0) st.speed = 0;
+  }
 
   // ---- THE GATE. Everything above this line is the car; everything below is
   // the picture. On a capped frame we stop here, having advanced the physics

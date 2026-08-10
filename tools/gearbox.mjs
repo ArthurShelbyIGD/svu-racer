@@ -30,6 +30,7 @@ const r = await p.evaluate(async () => {
       : performance.now() > give ? fail(new Error('sim stalled')) : requestAnimationFrame(poll);
     poll();
   });
+  R.tune.holdX = 0;
   const reset = () => { R.st.speed = 0; R.st.gear = 0; R.pedal.brake = false; R.pedal.boost = false; };
 
   // 1. each gear's ceiling, held wide open

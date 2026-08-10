@@ -20,15 +20,22 @@
 // The previous version of this file spent all of that and still could not draw
 // a tick mark, a numeral, a wiper arm or a finger grip, because every one of
 // those is a dozen quads it did not have. Drawn into a canvas at boot they are
-// free: the whole cockpit is ONE 1024x960 canvas painted once, shown as six
-// screen-space quads in a single draw call, twelve triangles.
+// free: the whole cockpit is ONE 1024x960 canvas painted once, shown as SEVEN
+// screen-space quads in a single draw call, fourteen triangles.
 //
 // WHAT MOVES. The wheel turns and two needles sweep. They are separate quads
 // cut from the same canvas, and turning one means rotating FOUR CORNERS about a
 // pivot — sixteen floats — not rotating UVs (which would need a shader) and not
 // re-stroking the canvas (which would cost a texture upload every frame). The
-// tell-tale lamps change colour, which is twenty-four floats when the state
+// tell-tale lamps change colour, which is twelve floats each when the state
 // changes and nothing at all when it does not.
+//
+// AND THE GEAR NUMERAL CHANGES PICTURE. It is the one thing in here that is
+// neither a position nor a tint: every gear is a different glyph. All six are
+// drawn into the atlas at boot and the quad's four UVs are pointed at one of
+// them — eight floats on a shift, nothing between shifts, and still no canvas
+// touched after boot. Its colour is a tint like the lamps', because "you are
+// labouring" is a state and not a shape.
 //
 // HOW IT IS PINNED TO THE SCREEN. The mesh's vertices are stored in normalised
 // device coordinates and its matrixWorld is composed in onBeforeRender from the
@@ -68,6 +75,12 @@
 //   after    1 draw call, 12 triangles, at most 32 floats written per frame.
 //            Measured in the browser: update() costs 0.195 microseconds with
 //            everything moving and 0.033 once the needles settle.
+//   and now  1 draw call, 14 triangles. The gear readout added one quad and
+//            two triangles and no draw call, and it writes nothing on a frame
+//            where the gear, the power band and the redline all stay put —
+//            which is every frame except the shift itself. Measured with the
+//            scene wound up at 1440x720: 9 calls and 46,124 triangles for the
+//            whole game, against 9 and 46,122 before.
 //
 // Both measured with the scene frozen and the cockpit toggled, so the numbers
 // are the cockpit's own and not the road's.
@@ -100,6 +113,26 @@ const WHL_X = 0, WHL_Y = 448, WHL_S = 512;      // the wheel, hub at its centre
 const NDL_X = 536, NDL_Y = 448, NDL_W = 32, NDL_H = 128;
 const NDL_PIVOT = 100;                          // pivot this far down the sprite
 const LMP_X = 600, LMP_Y = 448, LMP_W = 128, LMP_H = 64;
+// THE GEAR NUMERALS, one cell per gear, all six drawn at boot.
+//
+// This is the one thing in here that cannot be a corner move or a tint: which
+// numeral is on show is a different PICTURE, not a different position, and the
+// dash canvas is painted once and must not be repainted per frame. So the
+// numerals live side by side in the atlas and the gear quad's four UVs are
+// pointed at one of them — eight floats, written when the gear changes and on
+// no other frame. It is cheaper than the lamp's twenty-four and it happens
+// less often; nothing is redrawn, uploaded or allocated.
+//
+// SIX CELLS FOR FIVE GEARS. main.js's GEARS has five entries today and the
+// garage is meant to sell ratios later; a sixth cell costs 3.5KB of a texture
+// that is already 5.2MB and means a six-speed box needs no atlas change.
+//
+// Placed at x 592 — 80px clear of the wheel, 24 of the needle — and y 616, 40
+// below the needle's cell and 104 below the lamp's, so the mip chain has the
+// same clear gutter every other region here has. The strip ends at x 1000 and
+// y 680, both inside the atlas.
+const DIG_X = 592, DIG_Y = 616, DIG_W = 48, DIG_H = 64;
+const DIG_STRIDE = 72, DIG_N = 6;
 
 // ------------------------------------------------------------ the framing
 //
@@ -195,6 +228,92 @@ const POD_HW = 0.130;           // half-width of the binnacle, frame widths
 // The red zone at 88% is therefore somewhere only a boosted top gear goes.
 const MPH = 0.9633;
 const DIAL_FULL = 320;
+
+// ------------------------------------------------- the gear, in the tacho
+//
+// WHERE A GEAR NUMBER GOES, and it is not the radio panel. That panel's LCD is
+// 107 x 16 device pixels on the owner's phone — two characters at best — and
+// nothing about a stereo says "third". The tacho face is 137 device pixels
+// across, nine times the area, and the lower half of a rev counter is where
+// every performance car with a gear readout puts one, for the same reason it
+// is free here: the needle never goes there.
+//
+// THE LOWER HALF IS THE ONLY PLACE ON THIS FACE IT FITS. Measured against the
+// dial the file already draws, in units of the dial radius r (40.6 art px, 68
+// device px):
+//
+//   the needle sweeps +/-125 degrees, so the 110-degree wedge at the BOTTOM of
+//   the face is the one place it cannot reach. At full deflection it passes
+//   x = +/-0.63r at the numeral's own height, and the widest numeral reaches
+//   0.24r either side of centre. Nothing is ever drawn over the readout, and
+//   the redline frame in shots/gd-g5-red-dial.png is the proof.
+//   the graduation numerals "0" and "8" sit at (+/-0.41r, +0.28r), inner edge
+//   0.35r out. The numeral stops at 0.24r: seven device pixels of clear air.
+//   the red zone's lower end is at (+0.56r, +0.39r), further out again.
+//   the needle's chrome cap covers 0.085r around the spindle. The numeral's
+//   top edge is at 0.44r - 0.30r = 0.14r, so it clears the cap as well.
+//
+// MEASURED ON THE PANEL, not asserted: 37 device pixels of white numeral, 41
+// with its ink outline, 31 to 33 wide, in every gear. tools/geardash.mjs.
+//
+// GEAR_CY_R is where the numeral's WHITE is centred, not where its quad is:
+// the quad is sized and offset at boot from the ink actually drawn into the
+// atlas cell, so a font whose digits sit high or low in the em box cannot
+// quietly shift the readout off the axis of the dial.
+const GEAR_CAP_R = 0.55;        // numeral cap height, in dial radii
+const GEAR_CY_R = 0.44;         // its centre, below the dial centre, same units
+// The two states the numeral has. WHITE IS THE SAME WHITE THE GRADUATIONS ARE
+// PAINTED IN, so the readout looks like the rest of the instrument rather than
+// like something sitting on top of it, and the amber is the amber of a warning
+// lamp. Both are tints on one white drawing, which is how the lamps work too.
+const GEAR_LIT = new Color(0xe8ecf0);       // C.mark
+const GEAR_LOW = new Color(0xffae2e);
+/**
+ * WHERE THE AMBER STARTS, AND WHY IT IS 0.3947 AND NOT "A THIRD".
+ *
+ * main.js's torque curve is `0.42 + 0.58*(rev/0.5)**0.8` below the peak at
+ * rev 0.5 — an engine that makes 42% of its torque at a standstill and all of
+ * it at half revs. The bottom of a power band is conventionally where the
+ * engine has lost a tenth of its peak, and solving that curve for 0.90 gives
+ * rev = 0.5 * ((0.90-0.42)/0.58)**(1/0.8) = 0.3947. It is written as the
+ * arithmetic rather than as the answer so that a change to the curve in
+ * main.js shows up here as a wrong-looking constant rather than as nothing.
+ *
+ * IT HAS TO BE ABOVE THE AUTOMATIC DOWNSHIFT OR IT IS A DEAD LAMP, and this is
+ * the check that nearly went missing. main.js drops a gear whenever the speed
+ * falls below 0.45 of the gear below's ceiling, which in revs is 0.45 *
+ * GEARS[i-1]/GEARS[i]: 0.287 in second, 0.331 in third, 0.351 in fourth, 0.369
+ * in fifth. Anything below 0.369 could never be seen in top gear and anything
+ * below 0.331 could never be seen in third — an 80%-of-peak threshold, which
+ * is the other convention, lands at 0.295 and would have been an instrument
+ * that never once lit. 0.3947 leaves a live band in every gear.
+ *
+ * The threshold is against the RAW rev main.js sends, because that is the
+ * number the torque curve is a function of — not against the needle's
+ * position, which carries a 0.10 idle floor on top of it.
+ */
+const POWER_BAND_LO = 0.5 * ((0.90 - 0.42) / 0.58) ** (1 / 0.8);
+/**
+ * AND IT CLEARS AT THE TORQUE PEAK, NOT AT THE SAME EDGE IT LIT.
+ *
+ * Measured on a live twenty-second run rather than reasoned about: shifting at
+ * the limiter the amber never appears, which is right; shifting at half revs
+ * it appeared for 0.08 of a second in the whole run — ONE FRAME. The engine
+ * accelerates out of the bottom of its own power band in about a fifth of a
+ * second, so a warning that turns off at the exact rev it turns on at is a
+ * warning nobody will ever see, and this project has shipped enough of those.
+ *
+ * So the numeral latches: amber below 0.3947, and white again only once the
+ * engine is back at the peak of its torque curve at 0.5. That is the same
+ * hysteresis a real tell-tale has, it cannot flicker, and it says something
+ * true for the whole time it is lit — you dropped out of the band and you are
+ * not back on the peak yet. The same twenty seconds now measures 0.35s of
+ * amber for the half-revs shifter and 3.2s for one shifting at 42%, against
+ * 0.08s and 1.1s without the latch, and still exactly none for the driver who
+ * uses the limiter. That last figure is the one that matters: the colour has
+ * to stay off for someone driving well or it is decoration.
+ */
+const POWER_BAND_PEAK = 0.5;
 
 const LAMP_Y = 0.762;
 const LAMP_DX = 0.205;
@@ -415,10 +534,19 @@ function dial(x, cx, cy, r, o) {
   // The legend, so the two big dials are not interchangeable at a glance. Only
   // on the big pair — at the sub-dials' radius it came out as four grey pixels
   // of mush, which is worse than nothing because the eye still stops on it.
+  //
+  // THE TACHO'S LEGEND MOVES ABOVE THE SPINDLE, because the gear numeral wants
+  // the lower half and both cannot have it. "RPM" sat at rf*0.50, dead centre
+  // of where the numeral goes, and the space left either side of it was 11 art
+  // pixels above and 13 below — 19 and 22 on the phone, a footnote rather than
+  // a readout. Above the spindle the legend has the same clear air the "2" and
+  // "6" graduations have beside it, and the needle crosses it at half revs
+  // exactly as it crosses the "4" it now sits under. This is the only mark on
+  // the existing dial that moved.
   if (o.label) {
     x.font = `${Math.max(7, Math.round(r * 0.19))}px sans-serif`;
     x.fillStyle = C.trimHi;
-    x.fillText(o.label, cx, cy + rf * 0.50);
+    x.fillText(o.label, cx, cy + rf * (o.labelUp ? -0.34 : 0.50));
   }
 }
 
@@ -434,7 +562,8 @@ function dial(x, cx, cy, r, o) {
 function drawDials(x, W, H, mirrored) {
   const at = (fx) => (mirrored ? 1 - fx : fx) * W;
   dial(x, at(WHEEL_X - DIAL_DX), DIAL_Y * H, DIAL_R * H,
-       { majors: 8, minors: 2, step: 1, labelEvery: 2, red: 0.80, label: 'RPM' });
+       { majors: 8, minors: 2, step: 1, labelEvery: 2, red: 0.80, label: 'RPM',
+         labelUp: true });
   dial(x, at(WHEEL_X + DIAL_DX), DIAL_Y * H, DIAL_R * H,
        { majors: 8, minors: 2, step: DIAL_FULL / 8, labelEvery: 2, red: 0.88,
          label: 'MPH' });
@@ -980,6 +1109,39 @@ function drawLamp(x, W, H) {
   x.fillRect(W * 0.22, H * 0.30, W * 0.34, H * 0.10);
 }
 
+// -------------------------------------------------------- the gear numerals
+//
+// SIX CELLS, DRAWN WHITE, so the tint that says "you are labouring" is twelve
+// floats of vertex colour rather than a second set of six drawings.
+//
+// INKED LIKE EVERYTHING ELSE IN HERE. A bare white glyph on a near-black face
+// is a web page's idea of a readout; the same glyph with a heavy black line
+// round it is the same drawing the dash, the wheel and the vents are made of,
+// and it is also what keeps the numeral readable when it goes amber against
+// the face's #22262b sheen. Five atlas pixels of ink is 4.6 on the phone,
+// which is the file's own silhouette weight of 7 scaled by the 0.91 this
+// sprite is minified to.
+//
+// The font size is deliberately not tuned to hit a cap height: the cell is
+// drawn generously and the QUAD is sized at boot from the ink that actually
+// landed, which is the only way to be right about a numeral's height without
+// trusting a font metric that varies by device.
+function drawGearDigits(x) {
+  x.textAlign = 'center';
+  x.textBaseline = 'middle';
+  x.font = 'bold 62px sans-serif';
+  x.lineJoin = 'round';
+  x.lineCap = 'round';
+  for (let k = 0; k < DIG_N; k++) {
+    const cx = k * DIG_STRIDE + DIG_W * 0.5, cy = DIG_H * 0.5;
+    const s = String(k + 1);
+    x.strokeStyle = INKC; x.lineWidth = 5;
+    x.strokeText(s, cx, cy);
+    x.fillStyle = '#ffffff';
+    x.fillText(s, cx, cy);
+  }
+}
+
 // =========================================================================
 /**
  * Build the cockpit.
@@ -1015,6 +1177,37 @@ export function buildCockpit(o = {}) {
   inRegion(WHL_X, WHL_Y, WHL_S, WHL_S, (x, s) => drawWheel(x, s, {}));
   inRegion(NDL_X, NDL_Y, NDL_W, NDL_H, (x, w, h) => drawNeedle(x, w, h));
   inRegion(LMP_X, LMP_Y, LMP_W, LMP_H, (x, w, h) => drawLamp(x, w, h));
+  inRegion(DIG_X, DIG_Y, DIG_N * DIG_STRIDE, DIG_H, (x) => drawGearDigits(x));
+
+  // HOW BIG THE NUMERAL ACTUALLY CAME OUT, read back off the canvas rather
+  // than derived from the font size. Cap height is not a fraction of the em box
+  // that can be relied on — it is 0.70 in one grotesque and 0.73 in the next,
+  // and "sans-serif" resolves to whatever the WebView has — so the one honest
+  // way to put a 41-device-pixel numeral on the dial is to measure the drawing
+  // and size the quad from it. One 432x64 readback at boot, once.
+  //
+  // The WHITE is measured, not the ink around it: the ink is a 5px outline that
+  // grows the glyph by the same amount whatever the font does, and the height a
+  // driver reads is the height of the numeral, not of its shadow.
+  let digTop = 0, digBot = DIG_H - 1;
+  {
+    const d = g.getImageData(DIG_X, DIG_Y, DIG_N * DIG_STRIDE, DIG_H).data;
+    const wide = DIG_N * DIG_STRIDE;
+    let top = -1, bot = -1;
+    for (let y = 0; y < DIG_H; y++) {
+      for (let px = 0; px < wide; px++) {
+        const i = (y * wide + px) * 4;
+        if (d[i + 3] > 128 && d[i] > 160 && d[i + 1] > 160) {
+          if (top < 0) top = y;
+          bot = y;
+          break;
+        }
+      }
+    }
+    if (top >= 0) { digTop = top; digBot = bot; }
+  }
+  const digCap = digBot - digTop + 1;                  // white cap height, atlas px
+  const digMid = (digTop + digBot + 1) * 0.5;          // its centre in the cell
 
   if (flip) {
     // LEFT-HAND DRIVE, and it is three separate jobs rather than one. Mirroring
@@ -1068,13 +1261,23 @@ export function buildCockpit(o = {}) {
   // Each entry is the atlas rectangle the quad is cut from. The two lamps share
   // one drawing and so do the two needles — a needle is a needle, and the tint
   // that tells a boost from a brake is in the vertex colour, not the pixels.
+  // THE GEAR NUMERAL GOES IN AT INDEX 1, UNDER EVERYTHING THAT MOVES, and that
+  // position is a bug fix rather than tidiness. Appended at the end it would
+  // have drawn over the steering wheel: the wheel turns 140 degrees each way,
+  // and at 43 degrees of lock a spoke passes straight across the tacho — a
+  // numeral floating on top of a spoke is precisely the "web overlay" this is
+  // meant not to be. Under the needle for the same reason, so the needle
+  // sweeps over the printed face the way it does on a real dial.
+  const Q_DASH = 0, Q_GEAR = 1, Q_LAMP_L = 2, Q_LAMP_R = 3;
+  const Q_NDL_R = 4, Q_NDL_S = 5, Q_WHEEL = 6;
   const QUADS = [
     [ART_X, ART_Y, ART_W, ART_H],                 // 0 dash, everything static
-    [LMP_X, LMP_Y, LMP_W, LMP_H],                 // 1 tell-tale, driver's left
-    [LMP_X, LMP_Y, LMP_W, LMP_H],                 // 2 tell-tale, driver's right
-    [NDL_X, NDL_Y, NDL_W, NDL_H],                 // 3 tacho needle
-    [NDL_X, NDL_Y, NDL_W, NDL_H],                 // 4 speedo needle
-    [WHL_X, WHL_Y, WHL_S, WHL_S],                 // 5 the wheel, in front
+    [DIG_X, DIG_Y, DIG_W, DIG_H],                 // 1 gear numeral, UVs moved
+    [LMP_X, LMP_Y, LMP_W, LMP_H],                 // 2 tell-tale, driver's left
+    [LMP_X, LMP_Y, LMP_W, LMP_H],                 // 3 tell-tale, driver's right
+    [NDL_X, NDL_Y, NDL_W, NDL_H],                 // 4 tacho needle
+    [NDL_X, NDL_Y, NDL_W, NDL_H],                 // 5 speedo needle
+    [WHL_X, WHL_Y, WHL_S, WHL_S],                 // 6 the wheel, in front
   ];
   const NQ = QUADS.length;
 
@@ -1104,8 +1307,20 @@ export function buildCockpit(o = {}) {
     corn[c + 6] = ox0; corn[c + 7] = oy1;     // bottom-left
   };
 
-  setQuad(0, 0, 0, 0, 0, AW, AH);
-  for (const [i, sgn] of [[1, -1], [2, 1]]) {
+  setQuad(Q_DASH, 0, 0, 0, 0, AW, AH);
+  // The gear numeral, in the face of the tacho. Sized from the ink measured
+  // above so the white of the numeral is GEAR_CAP_R dial radii tall, and
+  // offset so that ink — not the cell it happens to sit in — is centred on
+  // GEAR_CY_R below the spindle.
+  {
+    const dr = DIAL_R * AH;                              // dial radius, art px
+    const dScale = (GEAR_CAP_R * dr) / digCap;           // art px per atlas px
+    const hw = DIG_W * 0.5 * dScale, hh = DIG_H * 0.5 * dScale;
+    const inkOff = (digMid - DIG_H * 0.5) * dScale;      // ink centre off cell centre
+    setQuad(Q_GEAR, fx2a(WHEEL_X - DIAL_DX),
+            fy2a(DIAL_Y) + GEAR_CY_R * dr - inkOff, -hw, -hh, hw, hh);
+  }
+  for (const [i, sgn] of [[Q_LAMP_L, -1], [Q_LAMP_R, 1]]) {
     setQuad(i, fx2a(WHEEL_X + sgn * LAMP_DX), fy2a(LAMP_Y),
             -fw2a(LAMP_W_F) * 0.5, -fy2a(LAMP_H_F) * 0.5,
             fw2a(LAMP_W_F) * 0.5, fy2a(LAMP_H_F) * 0.5);
@@ -1114,7 +1329,7 @@ export function buildCockpit(o = {}) {
   // the dial radius, which is where the reference's needles stop.
   const ndlLen = DIAL_R * 0.80 * AH;                       // pivot to tip
   const ndlScale = ndlLen / NDL_PIVOT;
-  for (const [i, sgn] of [[3, -1], [4, 1]]) {
+  for (const [i, sgn] of [[Q_NDL_R, -1], [Q_NDL_S, 1]]) {
     setQuad(i, fx2a(WHEEL_X + sgn * DIAL_DX), fy2a(DIAL_Y),
             -NDL_W * 0.5 * ndlScale, -NDL_PIVOT * ndlScale,
             NDL_W * 0.5 * ndlScale, (NDL_H - NDL_PIVOT) * ndlScale);
@@ -1122,7 +1337,7 @@ export function buildCockpit(o = {}) {
   // The wheel. The sprite's rim sits at 0.468 of its half-width from the
   // centre, so the quad has to be that much bigger than the rim it draws.
   const whlHalf = (WHEEL_R * AH) * (0.5 / 0.468);
-  setQuad(5, fx2a(WHEEL_X), fy2a(WHEEL_Y), -whlHalf, -whlHalf, whlHalf, whlHalf);
+  setQuad(Q_WHEEL, fx2a(WHEEL_X), fy2a(WHEEL_Y), -whlHalf, -whlHalf, whlHalf, whlHalf);
 
   // -------------------------------------------------------------- buffers
   const pos = new Float32Array(NQ * 4 * 3);
@@ -1197,9 +1412,15 @@ export function buildCockpit(o = {}) {
   posAttr.setUsage(35048);              // DynamicDraw: the wheel lives here
   const colAttr = new BufferAttribute(col, 3);
   colAttr.setUsage(35048);
+  // THE UVs ARE DYNAMIC NOW, for one quad and one reason: the gear numeral is
+  // a different cell of the atlas in each gear. Eight floats on a shift and
+  // nothing on any other frame — cheaper than the tell-tales, which rewrite
+  // twenty-four whenever the brake goes on.
+  const uvAttr = new BufferAttribute(uv, 2);
+  uvAttr.setUsage(35048);
   const geo = new BufferGeometry();
   geo.setAttribute('position', posAttr);
-  geo.setAttribute('uv', new BufferAttribute(uv, 2));
+  geo.setAttribute('uv', uvAttr);
   geo.setAttribute('color', colAttr);
   geo.setIndex(new BufferAttribute(idx, 1));
   geo.boundingSphere = null;
@@ -1266,20 +1487,41 @@ export function buildCockpit(o = {}) {
   const LAMP_OFF = new Color(0x3a3f45);
   const LAMP_BOOST = new Color(0xffb648);
   const LAMP_BRAKE = new Color(0xff4a3a);
+  const LAMP_SHIFT = new Color(0xff3b2a);
 
   let needleA = -NEEDLE_SWEEP, needleB = -NEEDLE_SWEEP;
-  let lastW = 9, lastA = 9, lastB = 9, lamp = -1;
+  let lastW = 9, lastA = 9, lastB = 9;
+  let lampL = -1, lampR = -1, gearShown = -1, gearLow = -1;
 
-  const paintLamps = (c) => {
-    for (let q = 1; q <= 2; q++) {
-      for (let k = 0; k < 4; k++) {
-        const j = (q * 4 + k) * 3;
-        col[j] = c.r; col[j + 1] = c.g; col[j + 2] = c.b;
-      }
+  /** Tint one quad's four corners. The lamps and the gear numeral all work
+   *  this way: one white drawing, a colour per state, twelve floats. */
+  const paintQuad = (q, c) => {
+    for (let k = 0; k < 4; k++) {
+      const j = (q * 4 + k) * 3;
+      col[j] = c.r; col[j + 1] = c.g; col[j + 2] = c.b;
     }
     colAttr.needsUpdate = true;
   };
-  paintLamps(LAMP_OFF);
+
+  /**
+   * Point the gear quad at one of the numerals in the atlas.
+   *
+   * Clamped to the cells that exist rather than trusting the caller: a garage
+   * that sells a seventh ratio one day should show a 6 and not sample the
+   * gutter, which at this mip level would be a smear of the lamp lens.
+   */
+  const setGear = (n) => {
+    const k = n < 0 ? 0 : n > DIG_N - 1 ? DIG_N - 1 : n;
+    const x0 = DIG_X + k * DIG_STRIDE;
+    const u0 = x0 / ATLAS_W, u1 = (x0 + DIG_W) / ATLAS_W;
+    const b = Q_GEAR * 8;
+    uv[b] = u0; uv[b + 2] = u1; uv[b + 4] = u1; uv[b + 6] = u0;
+    uvAttr.needsUpdate = true;
+  };
+
+  paintQuad(Q_LAMP_L, LAMP_OFF);
+  paintQuad(Q_LAMP_R, LAMP_OFF);
+  paintQuad(Q_GEAR, GEAR_LIT);
 
   /**
    * Called once per frame, before rendering.
@@ -1315,20 +1557,60 @@ export function buildCockpit(o = {}) {
 
     let moved = false;
     if (wheel > lastW + STILL || wheel < lastW - STILL) {
-      angles[5] = wheel; placeQuad(5, wheel); lastW = wheel; moved = true;
+      angles[Q_WHEEL] = wheel; placeQuad(Q_WHEEL, wheel); lastW = wheel; moved = true;
     }
     if (needleA > lastA + STILL || needleA < lastA - STILL) {
-      angles[3] = needleA; placeQuad(3, needleA); lastA = needleA; moved = true;
+      angles[Q_NDL_R] = needleA; placeQuad(Q_NDL_R, needleA); lastA = needleA; moved = true;
     }
     if (needleB > lastB + STILL || needleB < lastB - STILL) {
-      angles[4] = needleB; placeQuad(4, needleB); lastB = needleB; moved = true;
+      angles[Q_NDL_S] = needleB; placeQuad(Q_NDL_S, needleB); lastB = needleB; moved = true;
     }
     if (moved) posAttr.needsUpdate = true;
 
+    // ---- the gear, and whether the engine is happy in it --------------------
+    //
+    // WHICH NUMERAL, and only when it changes. `gear` is a 0-based index into
+    // main.js's GEARS, so the driver's first gear is index 0 and the numeral
+    // that has to appear is 1.
+    const gear = s.gear != null ? s.gear : 0;
+    if (gear !== gearShown) { gearShown = gear; setGear(gear); }
+    // AMBER MEANS THE GEAR IS TOO TALL FOR THE REVS. Below POWER_BAND_LO the
+    // engine has lost a tenth of its peak torque and the gear below would pull
+    // harder; in first there is no gear below, so the numeral stays white
+    // however slowly the car is rolling. No word appears anywhere — a number
+    // that changes colour is an instrument, and "DOWNSHIFT" in a typeface is a
+    // web page that has landed on the windscreen.
+    //
+    // Latched: once amber, the bar to clear it is the torque peak rather than
+    // the edge it crossed, so the state cannot flicker and cannot flash past
+    // in a single frame. See POWER_BAND_PEAK.
+    const low = (s.rev != null && gear > 0
+      && s.rev < (gearLow === 1 ? POWER_BAND_PEAK : POWER_BAND_LO)) ? 1 : 0;
+    if (low !== gearLow) { gearLow = low; paintQuad(Q_GEAR, low ? GEAR_LOW : GEAR_LIT); }
+
+    // ---- the tell-tales -----------------------------------------------------
+    //
+    // TWO LAMPS, TWO JOBS, which is what a pair of lamps is for. They used to
+    // be painted as one: boost lit both amber and the brake lit both red, so
+    // the second lamp carried no information the first did not. The one on the
+    // tacho's side is now the SHIFT LIGHT and the one on the driver's side
+    // keeps the brake and the boost — no third lamp, no new drawing, and the
+    // pair still mirrors correctly for a left-hand-drive cockpit because both
+    // are placed through fx2a.
+    //
+    // IT LIGHTS WHEN THE NEEDLE ENTERS THE RED THE DIAL ALREADY DRAWS, at 0.80
+    // of the sweep, and it is tested against the same displayed rev the needle
+    // is driven by — including the 0.10 idle floor — so lamp and needle can
+    // never disagree about where the red zone is. In raw engine revs that is
+    // 0.778, a shade before main.js's limiter at 0.80: a shift light that
+    // warns is worth more than one that reports.
+    const shift = rev >= 0.80 ? 1 : 0;
+    if (shift !== lampL) { lampL = shift; paintQuad(Q_LAMP_L, shift ? LAMP_SHIFT : LAMP_OFF); }
+
     const st = s.braking ? 2 : s.boosting ? 1 : 0;
-    if (st !== lamp) {
-      lamp = st;
-      paintLamps(st === 2 ? LAMP_BRAKE : st === 1 ? LAMP_BOOST : LAMP_OFF);
+    if (st !== lampR) {
+      lampR = st;
+      paintQuad(Q_LAMP_R, st === 2 ? LAMP_BRAKE : st === 1 ? LAMP_BOOST : LAMP_OFF);
     }
   };
 

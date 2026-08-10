@@ -276,6 +276,12 @@ const reach = await page.evaluate(async () => {
   // "reachable by driving the car properly", not "reachable by holding the
   // throttle on an ungeared engine". A gearbox that could not reach the car's
   // own top speed would be a serious bug and nothing else here would catch it.
+  // PIN IT ON THE TARMAC. This measures the ENGINE, and since the off-road
+  // penalty landed a car left to itself drifts onto the verge during a long
+  // pull and gets slowed by scenery — which reported "speed 300 reachable" at
+  // 69% and looked like a broken gearbox. Third instrument invalidated by that
+  // one change; the steering tests below deliberately do NOT pin it.
+  R.tune.holdX = 0;
   const out = [];
   for (const si of [0, 3, 5]) {
     R.tune.si = si; R.tune.maxSpeed = [110, 140, 170, 210, 250, 300][si];
@@ -289,6 +295,7 @@ const reach = await page.evaluate(async () => {
     }
     out.push({ cap: R.tune.maxSpeed, got: R.st.speed, gear: R.st.gear + 1 });
   }
+  R.tune.holdX = null;
   return out;
 });
 for (const r of reach) {
@@ -316,7 +323,9 @@ const pedals = await page.evaluate(async () => {
     };
     poll();
   });
+  R.tune.holdX = 0;                     // engine test, not a steering test
   R.tune.si = 3; R.tune.maxSpeed = 210;
+  R.st.gear = 4;                        // the boost claim is about TOP gear
   R.pedal.brake = false; R.pedal.boost = false;
   await settle(4);
   const cruise = R.st.speed;
@@ -325,6 +334,7 @@ const pedals = await page.evaluate(async () => {
   R.pedal.brake = false; R.pedal.boost = true; await settle(4);
   const boosted = R.st.speed;
   R.pedal.boost = false;
+  R.tune.holdX = null;
   return { cruise, braked, boosted, cap: R.tune.maxSpeed };
 });
 ok(pedals.braked < pedals.cruise - 20, 'brake slows the car',

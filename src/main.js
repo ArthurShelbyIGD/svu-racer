@@ -34,7 +34,10 @@ import { inkGroup, buildOutline, inkMaterial, pencilTexture, INK } from './art/t
 import { buildBody } from './car/body.js';
 import { buildFurniture } from './world/furniture.js';
 import { buildGantry } from './world/gantry.js';
-import { buildCockpit } from './car/cockpit.js';
+// PEDAL_TOP and PEDAL_W come from the cockpit because the cockpit DRAWS the
+// pedal and the boost bottle, and the picture and the hit test have to be the
+// same two numbers. See the note on them in cockpit.js.
+import { buildCockpit, PEDAL_TOP, PEDAL_W } from './car/cockpit.js';
 
 // ---------------------------------------------------------------- constants
 
@@ -2464,12 +2467,16 @@ function askTilt() {
  *
  * GENEROUS ON PURPOSE. Anthony: "generous amount of space around them so just
  * touching the screen anywhere close enough will work." Forty percent of the
- * width and forty-five percent of the height, per corner, and the on-screen
- * hints are sized from these same two numbers at boot so the label cannot drift
- * away from the region it is labelling.
+ * width and forty-five percent of the height, per corner, and whatever is drawn
+ * in those corners is placed from these same two numbers so the hint cannot
+ * drift away from the region it is hinting at.
+ *
+ * THE TWO NUMBERS NOW LIVE IN cockpit.js AND ARE IMPORTED AT THE TOP OF THIS
+ * FILE, because the cockpit draws the pedal and the nitrous bottle that hint at
+ * these regions and the drawing has to be placed by the same constants the
+ * touch is tested against. That is the second time this has been fixed: the
+ * hint used to be a CSS box of a different size again.
  */
-const PEDAL_TOP = 0.55;    // touches below this fraction of the height are pedals
-const PEDAL_W = 0.40;      // ...and within this fraction of the width, per side
 
 function readTouches(list) {
   let dir = 0, br = false, bo = false;
@@ -2486,17 +2493,11 @@ function readTouches(list) {
   touchDir = dir; pedal.brake = br; pedal.boost = bo;
 }
 
-/** Make the hints describe the hit test exactly, rather than approximately. */
-function sizePedalHints() {
-  for (const id of ['pL', 'pR']) {
-    const e = document.getElementById(id);
-    if (!e) continue;
-    e.style.width = (PEDAL_W * 100) + '%';
-    e.style.height = ((1 - PEDAL_TOP) * 100) + '%';
-    e.style.maxHeight = 'none';
-  }
-}
-sizePedalHints();
+// sizePedalHints() was here: it stretched the two HTML hint divs to PEDAL_W by
+// 1 - PEDAL_TOP at boot. The hints are drawn in the cockpit now, placed from
+// these same two constants, and the divs are gone from the shell — so a
+// function that sized elements which no longer exist would have been a note
+// telling the next person to look in the wrong file.
 
 /**
  * THE FIRST TOUCH ANYWHERE ASKS, not the first touch on the canvas.
@@ -3207,5 +3208,5 @@ window.RACER = {
   // against numbers copied into a test file, which then drift apart.
   race, startRace,
   consts: { ROAD_W, STEER_RATE, BRAKE_GRIP, CORNER_AUTHORITY, SPEED_STEPS, SEG_LEN, STRAY_MAX,
-            GEARS, REDLINE, MPH, RACE_FROM, RACE_LEN, COUNTDOWN },
+            GEARS, REDLINE, MPH, RACE_FROM, RACE_LEN, COUNTDOWN, PEDAL_TOP, PEDAL_W },
 };

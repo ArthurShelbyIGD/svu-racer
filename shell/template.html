@@ -101,27 +101,21 @@
      are only useful next to the dials that change them. */
   body.lean #hud, body.lean #ctl .dev { display: none; }
 
-  /* PEDAL HINTS. Not buttons — a wide region of the screen is live, because a
-     thumb on a moving phone does not hit a target. These are labels saying
-     where, and they never take a touch themselves (pointer-events:none) or
-     they would swallow the very input they are advertising.
-     THE SIZE IS SET FROM JAVASCRIPT at boot, from the same two constants the
-     hit test uses. It was written here as 33% by 40% while the hit test used
-     the whole left or right HALF of the screen — a hint that described a
-     different shape from the thing it was hinting at. One source of truth now;
-     the numbers here are only a fallback if the script never runs. */
-  .pedal {
-    position: fixed; bottom: max(8px, env(safe-area-inset-bottom));
-    width: 40%; height: 45%;
-    display: flex; align-items: flex-end; justify-content: center;
-    padding-bottom: 6px;
-    font-size: 12px; letter-spacing: 0.14em; color: #ffffff30;
-    border-radius: 14px; pointer-events: none; z-index: 4;
-  }
-  #pL { left: 0; border-left: none;
-        background: linear-gradient(to top right, #ff6b5e14, #0000 62%); }
-  #pR { right: 0;
-        background: linear-gradient(to top left, #6de3c81c, #0000 62%); }
+  /* THE PEDAL HINTS ARE NOT HERE ANY MORE, and that is the point of the
+     change. They were two divs saying BRAKE and BOOST in 12px grey at 19%
+     opacity with a faint corner wash behind them — a web page's caption laid
+     over a drawn cockpit, and the only thing in the frame that looked like a
+     web page. They are now a drilled alloy pedal and a nitrous bottle, drawn
+     in code into the cockpit's own atlas and shown on two more quads of the
+     one draw call that was already there, in the same palette and the same ink
+     weight as the steering wheel's spokes: src/car/cockpit.js, drawPedal and
+     drawBottle.
+     NOTHING ABOUT THE TOUCH REGIONS CHANGED. They were never these divs —
+     pointer-events was none, precisely so the label could not swallow the
+     input it was advertising — and they still are not: the region is
+     PEDAL_TOP and PEDAL_W, tested in readTouches, and the art is now placed
+     from those same two constants. tools/controls.mjs drives the real page
+     with real touches and says so. */
 
   /* THE FAILURE PANEL. A black screen is the worst bug report there is: the
      tester says "it didn't work", and that one sentence covers a device too old
@@ -142,10 +136,18 @@
 <canvas id="c"></canvas>
 <div id="hud"><div><span id="fps">--</span> FPS</div>
 <div id="hcols"><span id="stats"></span><span id="stats2"></span></div></div>
-<div id="pL" class="pedal">BRAKE</div>
-<div id="pR" class="pedal">BOOST</div>
 <div id="fail"></div>
-<div id="note">first touch goes fullscreen · tilt to steer · hold bottom-left to BRAKE, bottom-right to BOOST</div>
+<!-- SHORTER THAN IT WAS, AND MEASURED. It used to end "hold bottom-left to
+     BRAKE, bottom-right to BOOST" — 96 characters, which centred at 12px
+     monospace is 1382 of the 1440 device pixels on the owner's phone, so the
+     line ran straight through both bottom corners. That was invisible while
+     the corners held two 19%-opacity captions and became a line of text across
+     the brake pedal the moment the corners had a picture in them. The corners
+     now say what they are by being a pedal and a nitrous bottle, so the words
+     that duplicated them are gone and the line clears both controls with room
+     to spare. tools/pedalshots.mjs measures the gap on the real page rather
+     than trusting this arithmetic. -->
+<div id="note">first touch goes fullscreen · tilt to steer · corners are brake and boost</div>
 
 <!-- THE CONTROLS, IN TWO LAYERS.
      Six buttons a player has a reason to press, then the instruments behind

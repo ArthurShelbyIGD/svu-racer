@@ -1,11 +1,18 @@
 // The car, from inside — DRAWN, not modelled.
 //
-// INTERFACE NOTE FOR main.js: unchanged. buildCockpit({ pencil, palette, ink,
-// driverX }) still returns { group, update, stats }, update() still takes the
-// same {speed,maxSpeed,steer,boosting,braking} object or null, and the group is
-// still parented to the car and hidden by `group.visible`. Nothing in main.js
-// needs to move. The only addition is `atlas` on the returned object, which is
-// the canvas the cockpit is drawn into, exposed so a harness can photograph it.
+// INTERFACE NOTE FOR main.js: buildCockpit({ pencil, palette, ink, driverX })
+// still returns { group, update, stats }, update() still takes the same
+// {speed,maxSpeed,steer,boosting,braking} object or null, and the group is
+// still parented to the car and hidden by `group.visible`. Additions only:
+// `atlas`, the canvas the cockpit is drawn into, exposed so a harness can
+// photograph it; `setBoostFill`, which is the nitrous bottle's level; and
+// `stats.q`, the quad indices of the two corner controls, for the same reason.
+//
+// AND THIS FILE NOW EXPORTS PEDAL_TOP AND PEDAL_W, which main.js imports. They
+// are the live touch regions in the bottom corners and they are also what the
+// brake pedal and the nitrous bottle drawn in those corners are placed from —
+// one definition, so the picture cannot come adrift from the region it is
+// hinting at. That has gone wrong here once already; see the note on them.
 //
 // ----------------------------------------------------------------------------
 // WHY THIS IS A SPRITE AND NOT GEOMETRY.
@@ -20,8 +27,8 @@
 // The previous version of this file spent all of that and still could not draw
 // a tick mark, a numeral, a wiper arm or a finger grip, because every one of
 // those is a dozen quads it did not have. Drawn into a canvas at boot they are
-// free: the whole cockpit is ONE 1024x960 canvas painted once, shown as
-// THIRTEEN screen-space quads in a single draw call, twenty-six triangles.
+// free: the whole cockpit is ONE 1024x1216 canvas painted once, shown as
+// SIXTEEN screen-space quads in a single draw call, thirty-two triangles.
 //
 // WHAT MOVES. The wheel turns and two needles sweep. They are separate quads
 // cut from the same canvas, and turning one means rotating FOUR CORNERS about a
@@ -41,7 +48,7 @@
 // glyph. The radio's green display shows the lap time as four seven-segment
 // quads reading a strip of ten cells, and the countdown across the dash top is
 // one quad reading a strip of four — 3, 2, 1 and GO. A clock that ran a
-// fillText would repaint and re-upload a 1024x960 canvas ten times a second,
+// fillText would repaint and re-upload a 1024x1216 canvas ten times a second,
 // which is the one thing this file exists not to do. See THE RACE READOUT.
 //
 // HOW IT IS PINNED TO THE SCREEN. The mesh's vertices are stored in normalised
@@ -96,6 +103,21 @@
 //            tools/racedash.mjs: 9 calls and 46,076 triangles for the whole
 //            game against 9 and 46,064 before, in every race state there is.
 //
+//   and now  1 draw call, 32 triangles. The brake pedal, the nitrous bottle
+//            and the liquid in it are three more quads and SIX more triangles,
+//            and again no draw call, because they are cut from the atlas that
+//            was already bound. Measured at 1440x720 with tools/pedalshots.mjs
+//            on the grid: 11 calls and 46,344 triangles for the whole game
+//            against 11 and 46,338 before, in both states of both controls.
+//            They replaced two HTML divs, so the page also composites one
+//            fewer layer than it did.
+//
+//            Per frame: a press or a release is EIGHT floats, a UV move to the
+//            cell next door, and the bottle's liquid takes twelve more when it
+//            lights. Nothing on any frame where neither changes, which is
+//            almost all of them, and nothing is drawn, uploaded or allocated
+//            at any point — both pressed pictures were painted at boot.
+//
 //            Per frame it is cheaper than the gear numeral was: eight floats
 //            when the tenths digit rolls over, ten times a second, and nothing
 //            whatever on the other fifty frames. No string is built, no canvas
@@ -105,9 +127,10 @@
 // Both measured with the scene frozen and the cockpit toggled, so the numbers
 // are the cockpit's own and not the road's.
 //
-// The price is texture memory: 1024x960 RGBA with mipmaps is about 5.2MB. That
-// is the whole cost of this change, and it buys back 1,236 triangles and a draw
-// call on a PowerVR GE8320 that has neither to spare.
+// The price is texture memory: 1024x1216 RGBA with mipmaps is about 6.6MB —
+// 5.2MB of it the dashboard's, and 1.4MB the band of control cells added along
+// the bottom. That is the whole cost of all of this, and it buys back 1,236
+// triangles and a draw call on a PowerVR GE8320 that has neither to spare.
 
 import {
   BufferGeometry, BufferAttribute, Mesh, MeshBasicMaterial, Group,
@@ -127,7 +150,7 @@ const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 // is the only region whose aspect matters: the quad it is drawn on is scaled to
 // COVER the viewport, so on a squarer screen the sides are cropped rather than
 // the picture being squashed.
-const ATLAS_W = 1024, ATLAS_H = 960;
+const ATLAS_W = 1024, ATLAS_H = 1216;
 const ART_X = 0, ART_Y = 0, ART_W = 1024, ART_H = 427;
 const WHL_X = 0, WHL_Y = 448, WHL_S = 512;      // the wheel, hub at its centre
 const NDL_X = 536, NDL_Y = 448, NDL_W = 32, NDL_H = 128;
@@ -145,7 +168,7 @@ const LMP_X = 600, LMP_Y = 448, LMP_W = 128, LMP_H = 64;
 //
 // SIX CELLS FOR FIVE GEARS. main.js's GEARS has five entries today and the
 // garage is meant to sell ratios later; a sixth cell costs 3.5KB of a texture
-// that is already 5.2MB and means a six-speed box needs no atlas change.
+// that is already megabytes and means a six-speed box needs no atlas change.
 //
 // Placed at x 592 — 80px clear of the wheel, 24 of the needle — and y 616, 40
 // below the needle's cell and 104 below the lamp's, so the mip chain has the
@@ -196,6 +219,65 @@ const TAG_X = 540, TAG_Y = 748, TAG_W = 40, TAG_H = 12;
 // other line in the frame rather than being a property of this one.
 const CD_X = 540, CD_Y = 786, CD_W = 130, CD_H = 150, CD_STRIDE = 146, CD_N = 3;
 const GO_X = 750, GO_Y = 450, GO_W = 260, GO_H = 144;
+
+// ------------------------------------------- THE TWO CONTROLS IN THE CORNERS
+//
+// A DRILLED ALLOY PEDAL and a NITROUS BOTTLE, replacing two HTML divs that said
+// BRAKE and BOOST in 12px grey at 19% opacity. They are drawn here, in the
+// atlas, for the reason everything else in this file is: a word in a typeface
+// floating over a windscreen is a web page, and two more quads cut from a
+// texture that is already bound cost no draw call at all.
+//
+// FIVE CELLS AND WHY EACH ONE EXISTS.
+//
+//   the pedal, twice     up and pressed. The press is a UV MOVE — the same
+//                        trick the gear numeral uses — so a thumb going down
+//                        writes eight floats and touches no canvas. Both cells
+//                        come out of ONE function with a `press` argument, so
+//                        the pressed pedal cannot drift away from the raised
+//                        one the way two hand-drawn pictures would.
+//   the bottle, twice    dark and lit, the same way.
+//   the liquid, once     THIS IS THE FILL. See below.
+//
+// THEY ARE DRAWN AT ROUGHLY 1:1 WITH THE OWNER'S SCREEN, unlike the dash, and
+// that is measured rather than chosen. The wheel's 512px sprite lands on a
+// 531-device-pixel quad at 1440x720 — 1.04 device pixels per atlas pixel — so
+// the wheel is already drawn at 1:1 and its spokes' ink weights (8 for the
+// silhouette, 5 round a drilling) are ALSO their weights on the glass. These
+// cells are sized to land at 141x201 and 97x201 device pixels on the same
+// screen, so the same numbers give the same line, and the pedal reads as a part
+// off the same car rather than as a sticker with its own ink.
+//
+// PLACED IN THE ATLAS below the wheel, whose region ends at y 960: 24 pixels of
+// gutter, and 22 between cells, against the 21 the deepest mip level this
+// texture ever samples needs. The band ends at y 1184 inside a 1216-tall atlas.
+const PED_X = 8, PED_Y = 984, PED_W = 140, PED_H = 200, PED_STRIDE = 162;
+const BTL_X = 332, BTL_Y = 984, BTL_W = 96, BTL_H = 200, BTL_STRIDE = 118;
+/**
+ * THE GLASS, in fractions of the bottle's cell — and THE FILL LEVEL LIVES HERE.
+ *
+ * WHICH PART IS THE FILL: quad Q_FILL, the liquid, cell LIQ_* below. Nothing
+ * else in the bottle moves or is redrawn when the level changes.
+ *
+ * Boost is free today, so the bottle ships full. When boost becomes something
+ * earned and spent, `setBoostFill(f)` — or a `boostLeft` field on the state
+ * object, which update() already reads — takes it from 1 to 0 and back with
+ * SIXTEEN FLOATS and no canvas touched: eight corners and the two v
+ * coordinates of the cell. The bottle IS the meter, which is the whole reason
+ * a bottle was chosen over a lightning bolt or a bar.
+ *
+ * HOW THE CROP WORKS, because it is the one part that is not obvious. The
+ * liquid is drawn with its SURFACE — the meniscus and the bright line under it
+ * — along the TOP of its cell. Showing a fill of f shows the top f of that
+ * drawing, with the quad's BOTTOM pinned to the bottom of the glass. So the
+ * surface is always at the top of the liquid, wherever the level is, and the
+ * part that gets cropped away is the featureless bottom of the column. Crop
+ * the other end and every level but full would be a flat-topped block.
+ */
+const GLS_X0 = 0.22, GLS_X1 = 0.78, GLS_Y0 = 0.445, GLS_Y1 = 0.925;
+const LIQ_X = 568, LIQ_Y = 984;
+const LIQ_W = Math.round((GLS_X1 - GLS_X0) * BTL_W);
+const LIQ_H = Math.round((GLS_Y1 - GLS_Y0) * BTL_H);
 
 // ------------------------------------------------------------ the framing
 //
@@ -494,6 +576,67 @@ const CD_HOLD = 0.7;            // how long GO stays up once the lights go out
 const CD_WAIT = new Color(0xffae2e);
 const CD_GO = new Color(0x7bf05a);
 
+// --------------------------------------------- WHERE THE TWO CONTROLS SIT
+/**
+ * THE LIVE REGION. These two numbers ARE the brake and the boost: main.js's
+ * touch handler calls a touch a brake when it lands below PEDAL_TOP of the
+ * height and inside PEDAL_W of the width on the left, and a boost when it does
+ * the same on the right. Forty percent of the width and forty-five percent of
+ * the height, per corner, deliberately generous — Anthony: "generous amount of
+ * space around them so just touching the screen anywhere close enough will
+ * work." A thumb on a phone on a bumpy train does not hit a target.
+ *
+ * THEY LIVE IN THIS FILE SO THAT THERE IS ONE OF THEM. There is history: the
+ * hint used to be a CSS box of 33% by 40% while the hit test used the whole
+ * left or right HALF of the screen — a label describing a different shape from
+ * the thing it labelled. That was fixed by sizing the div from these constants
+ * at boot; drawing the hint in here would have reopened it, because the art
+ * would have been positioned by numbers in one file and the touch tested by
+ * numbers in another. main.js imports them from here instead, so the pedal is
+ * placed by the SAME two constants that decide what a touch does, and the art
+ * cannot drift from the region however either is changed.
+ *
+ * THE ARTWORK IS A HINT INSIDE THE REGION AND IS NEVER THE TARGET. Nothing
+ * below shrinks anything: the mesh takes no input at all — it is a picture on
+ * a screen-space quad in a scene, with no hit test of any kind — and the region
+ * stays exactly as wide as these two numbers say. tools/controls.mjs drives the
+ * real page with real touches at real coordinates and is the proof.
+ */
+export const PEDAL_TOP = 0.55;   // touches below this fraction of the height are pedals
+export const PEDAL_W = 0.40;     // ...and within this fraction of the width, per side
+/**
+ * AND WHERE IN THAT REGION THE PICTURE GOES — all three in fractions OF THE
+ * REGION, never of the screen, so the hint moves and scales with the touch area
+ * if the touch area is ever retuned.
+ *
+ * OUTBOARD AND LOW, at a fifth of the way in from the screen's edge rather than
+ * in the middle of the region, and that is measured against the dashboard this
+ * has to sit on. The middle of the left region at 1440x720 is x 288, which is
+ * on top of the radio panel and its lap clock; the middle of the right one is
+ * on the tell-tale. A fifth of the way in is bare dash on both sides, and it is
+ * also where a thumb actually rests on a phone held in two hands.
+ *
+ * 0.60 OF THE REGION'S HEIGHT is 194 device pixels on the owner's phone, a
+ * little over half the height of the dashboard and about the size of the
+ * countdown numeral. Big enough to be a picture of something, and nowhere near
+ * big enough to be mistaken for the region it is standing in.
+ */
+const CTL_HF = 0.60;             // the control's height, fraction of the region's
+const CTL_CXF = 0.19;            // its centre, fraction of the region's width from the edge
+const CTL_CYF = 0.63;            // its centre, fraction of the region's height below the top
+// The nitrous. Bottle blue, because a nitrous bottle is blue and because
+// nothing else in this cockpit is — the dash is wood, the trim is grey and the
+// car is lime, so a cold blue in the corner is the one thing here that cannot
+// be mistaken for part of the dashboard behind it.
+const NOS = {
+  body: '#35789c', bodyLit: '#5cb8dc', hi: '#9ce0f5', lo: '#173b52',
+  glass: '#0e1a22', label: '#e8ecf0', bolt: '#ffae2e',
+};
+// The liquid, tinted rather than drawn twice: one white column, dark when the
+// bottle is idle and hot when it is being spent. Twelve floats.
+const LIQ_DIM = new Color(0x5ec9e2);
+const LIQ_LIT = new Color(0xaef2ff);
+
 // ------------------------------------------------------------------ colour
 //
 // Measured off ref/target-cockpit.png, sampled rather than chosen. The wood
@@ -564,6 +707,24 @@ function ink(x, fill, w) {
     x.lineJoin = 'round'; x.lineCap = 'round';
     x.stroke();
   }
+}
+
+/**
+ * A DRILLED HOLE THROUGH A CHROME PART, and there is exactly one of these in
+ * the file so that the wheel's spokes and the brake pedal cannot disagree
+ * about what a drilling looks like.
+ *
+ * Near-black inside with the file's panel-break ink round it, and a bright arc
+ * across the TOP INSIDE EDGE — which is the whole trick: light coming through
+ * the windscreen catches the far wall of the hole, and without that arc a
+ * drilled plate is a plate with black spots on it. The angles are canvas
+ * angles, so 1.1PI to 1.8PI is the upper edge.
+ */
+function drillHole(x, cx, cy, r) {
+  x.beginPath(); x.arc(cx, cy, r, 0, TAU);
+  ink(x, '#101318', 5);
+  x.beginPath(); x.arc(cx, cy, r * 0.72, Math.PI * 1.1, Math.PI * 1.8);
+  x.strokeStyle = 'rgba(190,198,202,0.55)'; x.lineWidth = 3; x.stroke();
 }
 
 /** A rounded rectangle, by hand, because roundRect is too new to rely on. */
@@ -1213,16 +1374,14 @@ function drawWheel(x, S, o) {
     x.lineTo(cx + ca * r1 - nx * w1 * 0.68, cy + sa * r1 - ny * w1 * 0.68);
     x.strokeStyle = C.chromeLo; x.lineWidth = S * 0.018; x.stroke();
     // THE SLOTS. Three drilled holes down each spoke — the thing that makes a
-    // three-spoke wheel look like a three-spoke wheel and not like a Y.
+    // three-spoke wheel look like a three-spoke wheel and not like a Y. Drawn
+    // by drillHole, which the brake pedal also calls: the pedal is meant to
+    // look like a part off this same car, and the surest way to get that is
+    // for the two of them to be the same code and not the same intention.
     for (let k = 0; k < 3; k++) {
       const t = 0.30 + k * 0.235;
       const r = r0 + (r1 - r0) * t;
-      const hr = (w0 + (w1 - w0) * t) * 0.44;
-      x.beginPath(); x.arc(cx + ca * r, cy + sa * r, hr, 0, TAU);
-      ink(x, '#101318', 5);
-      x.beginPath();
-      x.arc(cx + ca * r, cy + sa * r, hr * 0.72, Math.PI * 1.1, Math.PI * 1.8);
-      x.strokeStyle = 'rgba(190,198,202,0.55)'; x.lineWidth = 3; x.stroke();
+      drillHole(x, cx + ca * r, cy + sa * r, (w0 + (w1 - w0) * t) * 0.44);
     }
   }
 
@@ -1484,6 +1643,311 @@ function drawCountGlyph(x, w, h, s) {
 }
 
 /**
+ * THE BRAKE PEDAL. A drilled alloy race pedal, in the wheel's own chrome.
+ *
+ * "The same silver theme as the steering wheel spokes rather than black
+ * rubber", and that is taken literally rather than approximately: the fill is
+ * C.chrome, the hot edge C.chromeHi and the shaded one C.chromeLo — the three
+ * greys the spokes are painted in — the silhouette is inked at 8 and the
+ * drillings come out of drillHole, which is the function the spokes call. The
+ * only rubber in a race car is on the wheels.
+ *
+ * FLOOR-HINGED, NOT PENDANT, and that decides the whole animation. The pad is a
+ * trapezoid standing up off a hinge at its base; pressing swings the TOP of it
+ * away from you, so the top edge drops, the face foreshortens, the top edge
+ * narrows a little with the perspective and the shadow behind it collapses. The
+ * hinge line does not move. One function draws both cells from `press`, so the
+ * pressed pedal is the same pedal — a second hand-drawn picture would have
+ * drifted the first time either was touched.
+ *
+ * AND THE GHOST OF WHERE IT WAS, drawn only in the pressed cell: the raised
+ * outline in thin translucent ink, with three motion ticks off each shoulder.
+ * That is the comic's way of saying a thing moved, it costs six strokes drawn
+ * once, and without it a 20-pixel change on a 200-pixel pedal is a change
+ * nobody notices on a phone at arm's length.
+ */
+function drawPedal(x, w, h, press) {
+  const rnd = rndFrom(0x7c41);
+  const cx = w * 0.5;
+  const yHinge = h * 0.93;                        // the hinge line: it never moves
+  const top = (p) => h * (0.20 + 0.115 * p);      // the top edge, which does
+  const topHW = (p) => w * (0.320 - 0.018 * p);   // and narrows as it goes away
+  const botHW = w * 0.38;
+  const y0 = top(press), tHW = topHW(press);
+  // the face, as a path: a trapezoid, wider at the hinge because that end is
+  // nearer the eye
+  const face = (yTop, hw) => poly(x, [cx - hw, yTop, cx + hw, yTop,
+                                      cx + botHW, yHinge, cx - botHW, yHinge]);
+  // A point on the face in pad coordinates: u across (-1 to 1), v down (0 to 1).
+  const px = (u, v) => cx + u * (tHW + v * (botHW - tHW));
+  const py = (v) => y0 + v * (yHinge - y0);
+
+  // ---- the shadow it throws on the floor pan, which is how you can see it is
+  // standing off the floor at all. It collapses as the pedal goes down.
+  {
+    const o = h * (0.010 + 0.040 * (1 - press));
+    poly(x, [cx - tHW + o, y0 + o, cx + tHW + o, y0 + o,
+             cx + botHW + o * 0.35, yHinge + o * 0.35,
+             cx - botHW + o * 0.35, yHinge + o * 0.35]);
+    x.fillStyle = 'rgba(6,7,10,0.50)'; x.fill();
+  }
+
+  // ---- where it was, and the ticks that say it moved
+  //
+  // THE GHOST IS THE TOP EDGE AND TWO STUBS, not the whole outline. Drawn all
+  // the way round it read as an empty box the pedal had dropped out of — a
+  // slot, not a memory. Three strokes say "it was up there" and nothing says
+  // "there is a hole in your dashboard".
+  if (press > 0) {
+    const gy = top(0), ghw = topHW(0);
+    x.beginPath();
+    x.moveTo(cx - ghw, gy + h * 0.045);
+    x.lineTo(cx - ghw, gy); x.lineTo(cx + ghw, gy);
+    x.lineTo(cx + ghw, gy + h * 0.045);
+    x.strokeStyle = 'rgba(8,9,12,0.32)'; x.lineWidth = 3;
+    x.lineJoin = 'round'; x.lineCap = 'round'; x.stroke();
+    for (const sgn of [-1, 1]) {
+      for (let k = 0; k < 3; k++) {
+        const bx = cx + sgn * (topHW(0) + w * 0.045 + k * w * 0.055);
+        const by = top(0) + h * (0.02 + k * 0.035);
+        x.beginPath();
+        x.moveTo(bx, by);
+        x.lineTo(bx + sgn * w * 0.03, by - h * 0.045);
+        x.strokeStyle = INKC; x.lineWidth = 4; x.lineCap = 'round'; x.stroke();
+      }
+    }
+  }
+
+  // ---- the pad
+  face(y0, tHW);
+  ink(x, C.chrome, 8);
+  // chrome in flat bands, exactly as the spokes do it: a hot edge down one side
+  // and a dark one down the other, hard-edged, no shine
+  x.beginPath();
+  x.moveTo(px(-0.90, 0.04), py(0.04)); x.lineTo(px(-0.90, 0.96), py(0.96));
+  x.strokeStyle = C.chromeHi; x.lineWidth = 7; x.lineCap = 'round'; x.stroke();
+  x.beginPath();
+  x.moveTo(px(0.90, 0.04), py(0.04)); x.lineTo(px(0.90, 0.96), py(0.96));
+  x.strokeStyle = C.chromeLo; x.lineWidth = 8; x.stroke();
+  // the folded lips, top and bottom — a plate with a turned edge reads as a
+  // pedal, a flat plate reads as a card. Inset from the silhouette rather than
+  // run out to it: a bright bar poking past the ink line at each end is a bar
+  // lying on the pedal, which is what the first pass looked like.
+  x.beginPath();
+  x.moveTo(px(-0.88, 0.055), py(0.055)); x.lineTo(px(0.88, 0.055), py(0.055));
+  x.strokeStyle = C.chromeHi; x.lineWidth = 6; x.stroke();
+  x.beginPath();
+  x.moveTo(px(-0.90, 0.105), py(0.105)); x.lineTo(px(0.90, 0.105), py(0.105));
+  x.strokeStyle = 'rgba(10,12,16,0.6)'; x.lineWidth = 3; x.stroke();
+  x.beginPath();
+  x.moveTo(px(-0.90, 0.945), py(0.945)); x.lineTo(px(0.90, 0.945), py(0.945));
+  x.strokeStyle = C.chromeLo; x.lineWidth = 6; x.stroke();
+
+  // ---- the drillings: three columns of four, the same hole the spokes have
+  for (let r = 0; r < 4; r++) {
+    const v = 0.28 + r * 0.165;
+    for (const u of [-0.60, 0, 0.60]) {
+      drillHole(x, px(u, v), py(v), w * (0.052 - 0.004 * press));
+    }
+  }
+
+  // ---- the hinge at the base: two knuckles and a pin, in the darker chrome so
+  // the pad is plainly the brighter thing standing on it
+  rrect(x, cx - botHW * 1.02, yHinge - h * 0.012, botHW * 2.04, h * 0.055, 6);
+  ink(x, C.chromeMid, 7);
+  for (const u of [-0.62, 0.62]) {
+    x.beginPath();
+    x.arc(cx + u * botHW, yHinge + h * 0.015, w * 0.038, 0, TAU);
+    ink(x, C.chromeHi, 4);
+  }
+
+  pencilPass(x, w, h, rnd, 90, 0.09);
+}
+
+/**
+ * THE NITROUS BOTTLE, which is the boost control and, later, its meter.
+ *
+ * WHY A BOTTLE. It reads at small size — a shape with a valve on top is a
+ * bottle at forty pixels, where an icon of a flame or a lightning bolt is a
+ * smudge — and when boost becomes something you earn and spend, a bottle with
+ * a liquid level in it IS the gauge. Nothing has to be added later and nothing
+ * has to be redrawn: see the note on GLS_* above for which part is the fill.
+ *
+ * IT IS THE ONE COLD THING IN THE CAR. The dash is wood, the trim is grey, the
+ * bodywork is lime; a blue bottle in the corner cannot be mistaken for a piece
+ * of the dashboard behind it, which matters more for a control than for
+ * scenery. The metalwork — valve, handwheel, collar, base ring — is the same
+ * chrome as the wheel's spokes and the pedal, so it is still a part off this
+ * car and not a sprite from another game.
+ *
+ * LIT IS THE SAME DRAWING WITH `lit` SET, not a second picture: brighter body,
+ * a hot rim, a hard-edged halo in three rings — flat comic glow, no gradients
+ * and no ctx.filter, both of which this file cannot use — and four rays off the
+ * valve. One function, so the two cells cannot drift apart.
+ */
+function drawBottle(x, w, h, lit) {
+  const rnd = rndFrom(0x3d92);
+  const cx = w * 0.5;
+  const bodyHW = w * 0.35;                  // the straight sides of the bottle
+  const yShoulder = h * 0.235, yStraight = h * 0.345, yBase = h * 0.965;
+
+  const shell = () => {
+    x.beginPath();
+    x.moveTo(cx - w * 0.085, h * 0.115);              // the neck, left side
+    x.lineTo(cx - w * 0.085, yShoulder);
+    x.quadraticCurveTo(cx - bodyHW, yShoulder + h * 0.01, cx - bodyHW, yStraight);
+    x.lineTo(cx - bodyHW, yBase - h * 0.03);
+    x.quadraticCurveTo(cx - bodyHW, yBase, cx - bodyHW + w * 0.07, yBase);
+    x.lineTo(cx + bodyHW - w * 0.07, yBase);
+    x.quadraticCurveTo(cx + bodyHW, yBase, cx + bodyHW, yBase - h * 0.03);
+    x.lineTo(cx + bodyHW, yStraight);
+    x.quadraticCurveTo(cx + bodyHW, yShoulder + h * 0.01, cx + w * 0.085, yShoulder);
+    x.lineTo(cx + w * 0.085, h * 0.115);
+    x.closePath();
+  };
+
+  // ---- the halo, first, so everything is drawn over it. Three hard rings,
+  // which is what a glow is in this style.
+  if (lit) {
+    for (const [k, a] of [[10, 0.10], [6, 0.16], [3, 0.30]]) {
+      shell();
+      x.strokeStyle = `rgba(140,226,248,${a})`; x.lineWidth = 8 + k * 2.2;
+      x.lineJoin = 'round'; x.stroke();
+    }
+  }
+
+  // ---- the valve on top: a handwheel, which is the single detail that says
+  // "pressurised bottle" rather than "milk"
+  {
+    const vy = h * 0.062, vr = w * 0.185;
+    x.beginPath(); x.arc(cx, vy, vr, 0, TAU);
+    ink(x, lit ? C.chromeHi : C.chrome, 6);
+    x.beginPath(); x.arc(cx, vy, vr * 0.44, 0, TAU);
+    ink(x, C.chromeLo, 4);
+    for (let k = 0; k < 3; k++) {
+      const a = (k / 3) * Math.PI;
+      x.beginPath();
+      x.moveTo(cx - Math.cos(a) * vr * 0.92, vy - Math.sin(a) * vr * 0.92);
+      x.lineTo(cx + Math.cos(a) * vr * 0.92, vy + Math.sin(a) * vr * 0.92);
+      x.strokeStyle = INKC; x.lineWidth = 3.5; x.lineCap = 'round'; x.stroke();
+    }
+    // the neck below it
+    x.fillStyle = C.chromeMid;
+    x.fillRect(cx - w * 0.085, vy, w * 0.17, h * 0.10);
+    x.beginPath();
+    x.moveTo(cx - w * 0.085, vy); x.lineTo(cx - w * 0.085, h * 0.16);
+    x.strokeStyle = INKC; x.lineWidth = 5; x.stroke();
+    x.beginPath();
+    x.moveTo(cx + w * 0.085, vy); x.lineTo(cx + w * 0.085, h * 0.16);
+    x.stroke();
+  }
+
+  // ---- the bottle itself
+  shell();
+  ink(x, lit ? NOS.bodyLit : NOS.body, 8);
+  // a hot edge down the left and a dark one down the right, the same three-band
+  // treatment as every other rounded thing in this cockpit
+  x.beginPath();
+  x.moveTo(cx - bodyHW + w * 0.055, yStraight + h * 0.01);
+  x.lineTo(cx - bodyHW + w * 0.055, yBase - h * 0.05);
+  x.strokeStyle = lit ? '#dcfbff' : NOS.hi; x.lineWidth = 6; x.lineCap = 'round';
+  x.stroke();
+  x.beginPath();
+  x.moveTo(cx + bodyHW - w * 0.05, yStraight + h * 0.01);
+  x.lineTo(cx + bodyHW - w * 0.05, yBase - h * 0.05);
+  x.strokeStyle = NOS.lo; x.lineWidth = 7; x.stroke();
+
+  // ---- the collar where the neck meets the shoulder
+  rrect(x, cx - w * 0.145, h * 0.150, w * 0.29, h * 0.055, 4);
+  ink(x, C.chrome, 5);
+
+  // ---- the label: a pale band across the shoulder with a bolt on it. No
+  // lettering — four letters in twenty device pixels is mush, and a bolt is
+  // the one mark nobody has to be taught.
+  {
+    const ly = h * 0.315, lh = h * 0.095;
+    rrect(x, cx - bodyHW + w * 0.03, ly, (bodyHW - w * 0.03) * 2, lh, 4);
+    ink(x, NOS.label, 5);
+    const bx = cx, by = ly + lh * 0.5, s = lh * 0.46;
+    poly(x, [bx - s * 0.30, by - s, bx + s * 0.62, by - s, bx + s * 0.06, by - s * 0.12,
+             bx + s * 0.70, by - s * 0.12, bx - s * 0.42, by + s,
+             bx + s * 0.06, by + s * 0.02, bx - s * 0.52, by + s * 0.02]);
+    ink(x, NOS.bolt, 4);
+  }
+
+  // ---- the sight glass, and the dark inside of an empty bottle. The liquid
+  // quad stands exactly on GLS_*, inset from this frame, so the ink round the
+  // glass is never covered however full the bottle is.
+  {
+    const gx = w * GLS_X0, gw = w * (GLS_X1 - GLS_X0);
+    const gy = h * GLS_Y0, gh = h * (GLS_Y1 - GLS_Y0);
+    rrect(x, gx - 4, gy - 4, gw + 8, gh + 8, 5);
+    ink(x, NOS.glass, 5);
+    // the empty part of the bottle is not flat black: a cold streak down the
+    // left of the glass, which is what the windscreen's light does to it
+    x.beginPath();
+    x.moveTo(gx + gw * 0.16, gy + gh * 0.06);
+    x.lineTo(gx + gw * 0.16, gy + gh * 0.94);
+    x.strokeStyle = 'rgba(120,190,215,0.22)'; x.lineWidth = 4; x.stroke();
+  }
+
+  // ---- the base ring it stands on
+  rrect(x, cx - bodyHW - w * 0.02, yBase - h * 0.035, (bodyHW + w * 0.02) * 2, h * 0.055, 4);
+  ink(x, C.chromeMid, 6);
+
+  // ---- and the rays, only when it is being spent
+  if (lit) {
+    const vy = h * 0.062;
+    for (const [dx, dy] of [[-1, -0.55], [1, -0.55], [-1.15, 0.1], [1.15, 0.1]]) {
+      x.beginPath();
+      x.moveTo(cx + dx * w * 0.24, vy + dy * h * 0.05);
+      x.lineTo(cx + dx * w * 0.40, vy + dy * h * 0.11);
+      x.strokeStyle = '#bff2ff'; x.lineWidth = 5; x.lineCap = 'round'; x.stroke();
+    }
+  }
+
+  pencilPass(x, w, h, rnd, 70, 0.08);
+}
+
+/**
+ * WHAT IS IN THE BOTTLE — THE FILL. This cell, on quad Q_FILL, is the meter.
+ *
+ * DRAWN WHITE so the colour is a tint: cold blue when the bottle is idle, hot
+ * white-blue while it is being spent, twelve floats between them and no second
+ * cell. The internal shading is BLACK at low alpha rather than grey, so it
+ * survives both tints — the same reason the seven-segment digits carry their
+ * unlit bars as 30% black.
+ *
+ * THE SURFACE IS ALONG THE TOP EDGE, and that is what makes a fill level
+ * possible without redrawing anything: a bright meniscus, a dark line under it,
+ * and below that a column that is deliberately featureless apart from three
+ * bubbles. Showing the top f of this cell in a quad f as tall, standing on the
+ * bottom of the glass, is a bottle f full.
+ */
+function drawLiquid(x, w, h) {
+  const rnd = rndFrom(0x18b7);
+  x.fillStyle = '#ffffff';
+  x.fillRect(0, 0, w, h);
+  // the far side of the column is in shade, the near-left catches the light
+  x.fillStyle = 'rgba(0,0,0,0.26)';
+  x.fillRect(w * 0.60, 0, w * 0.40, h);
+  x.fillStyle = 'rgba(0,0,0,0.14)';
+  x.fillRect(0, 0, w * 0.14, h);
+  // the surface: a hot band and the dark line that reads as its underside
+  x.fillStyle = 'rgba(255,255,255,1)';
+  x.fillRect(0, 0, w, Math.max(2, h * 0.045));
+  x.fillStyle = 'rgba(0,0,0,0.42)';
+  x.fillRect(0, Math.max(2, h * 0.045), w, Math.max(2, h * 0.028));
+  // three bubbles, because a column of flat colour is a bar and not a liquid
+  for (const [bx, by, br] of [[0.34, 0.20, 0.075], [0.62, 0.36, 0.055], [0.42, 0.58, 0.045]]) {
+    x.beginPath();
+    x.arc(w * bx, h * by, w * br, 0, TAU);
+    x.strokeStyle = 'rgba(0,0,0,0.30)'; x.lineWidth = 2; x.stroke();
+  }
+  pencilPass(x, w, h, rnd, 40, 0.07);
+}
+
+/**
  * The bounding box of the WHITE in a cell, read back off the canvas.
  *
  * The quad that shows a glyph is sized from what was actually drawn, never
@@ -1555,6 +2019,16 @@ export function buildCockpit(o = {}) {
              (x, w, h) => drawCountGlyph(x, w, h, String(CD_N - k)));
   }
   inRegion(GO_X, GO_Y, GO_W, GO_H, (x, w, h) => drawCountGlyph(x, w, h, 'GO'));
+  // THE TWO CONTROLS. Two cells each — raised and pressed, dark and lit — both
+  // out of one function, so a state cannot be drawn by a different hand from
+  // the one that drew the other.
+  for (let k = 0; k < 2; k++) {
+    inRegion(PED_X + k * PED_STRIDE, PED_Y, PED_W, PED_H,
+             (x, w, h) => drawPedal(x, w, h, k));
+    inRegion(BTL_X + k * BTL_STRIDE, BTL_Y, BTL_W, BTL_H,
+             (x, w, h) => drawBottle(x, w, h, k));
+  }
+  inRegion(LIQ_X, LIQ_Y, LIQ_W, LIQ_H, (x, w, h) => drawLiquid(x, w, h));
 
   // HOW BIG THE NUMERAL ACTUALLY CAME OUT, read back off the canvas rather
   // than derived from the font size. Cap height is not a fraction of the em box
@@ -1648,7 +2122,7 @@ export function buildCockpit(o = {}) {
   tex.magFilter = LinearFilter;
   tex.anisotropy = 1;
 
-  // ------------------------------------------------------ the thirteen quads
+  // ------------------------------------------------------- the sixteen quads
   //
   // Index order IS draw order inside a single call, so this list is also the
   // back-to-front order: the dash, then the tell-tales and needles on top of
@@ -1683,9 +2157,18 @@ export function buildCockpit(o = {}) {
   // in half — does not happen. The glyph stands at 0.5 of the frame and the
   // wheel is centred at 0.575 with spokes reaching 0.42 of its sprite, so the
   // one that comes round the top at full lock sweeps up the far side of it.
+  //
+  // THE PEDAL AND THE BOTTLE GO LAST, IN FRONT OF THE WHEEL, which is the
+  // opposite of the rule the countdown follows and for the opposite reason. The
+  // countdown is a thing in the car and gains from the rim crossing its foot;
+  // these two are the controls under your thumbs, in the near corners of the
+  // frame, and a steering wheel drawn over the brake would be a control the car
+  // is hiding. The liquid is drawn immediately after the bottle so it sits in
+  // the glass.
   const Q_DASH = 0, Q_GEAR = 1;
   const Q_LCD0 = 2, Q_TAG = 6, Q_LAMP_L = 7, Q_LAMP_R = 8;
   const Q_NDL_R = 9, Q_NDL_S = 10, Q_COUNT = 11, Q_WHEEL = 12;
+  const Q_PEDAL = 13, Q_BOTTLE = 14, Q_FILL = 15;
   const QUADS = [
     [ART_X, ART_Y, ART_W, ART_H],                 // 0 dash, everything static
     [DIG_X, DIG_Y, DIG_W, DIG_H],                 // 1 gear numeral, UVs moved
@@ -1700,6 +2183,9 @@ export function buildCockpit(o = {}) {
     [NDL_X, NDL_Y, NDL_W, NDL_H],                 // 10 speedo needle
     [CD_X, CD_Y, CD_W, CD_H],                     // 11 the countdown, UVs moved
     [WHL_X, WHL_Y, WHL_S, WHL_S],                 // 12 the wheel, in front
+    [PED_X, PED_Y, PED_W, PED_H],                 // 13 the brake pedal, UVs moved
+    [BTL_X, BTL_Y, BTL_W, BTL_H],                 // 14 the nitrous bottle, UVs moved
+    [LIQ_X, LIQ_Y, LIQ_W, LIQ_H],                 // 15 what is in it: THE FILL
   ];
   const NQ = QUADS.length;
 
@@ -1844,13 +2330,87 @@ export function buildCockpit(o = {}) {
   // a band of bare sky above the roof lining, which reads as the dashboard
   // having come loose. At 2.4:1 both branches give 1, so the only frame the
   // harness photographs was the one frame that could not show the bug.
+  //
+  // AND THE TWO CONTROLS ARE NOT FITTED WITH IT. They are pinned to the SCREEN,
+  // in fractions of the viewport, because the region they hint at is: a touch
+  // is a brake because of where it lands on the glass, and PEDAL_TOP and
+  // PEDAL_W are fractions of the glass. Put the pedal in art space and the
+  // cover-fit would slide it out from under its own touch area on any screen
+  // that is not 2.4:1 — at 16:9 the art is cropped 13% each side, which is 190
+  // device pixels of drift on the owner's phone. See layoutControls.
   const ART_A = ART_W / ART_H;
   let sx = 1, sy = 1, fitFor = -1;
   const setFit = (aspect) => {
     sx = Math.max(1, ART_A / aspect);
     sy = Math.max(1, aspect / ART_A);
     fitFor = aspect;
+    layoutControls(aspect);
   };
+
+  /**
+   * WHERE THE PEDAL AND THE BOTTLE GO, IN SCREEN FRACTIONS, ALL OF IT DERIVED
+   * FROM PEDAL_TOP AND PEDAL_W.
+   *
+   * THIS IS THE ONE THING IN HERE THAT MUST NOT BE ALLOWED TO DRIFT. The live
+   * region is 40% of the width and 45% of the height in each bottom corner and
+   * it is generous on purpose; the picture is a hint standing inside it and is
+   * never the target. So every number below is a fraction OF THE REGION —
+   * CTL_HF of its height, CTL_CXF of its width in from the screen edge, CTL_CYF
+   * of its height down from PEDAL_TOP — and the region comes from the same two
+   * exported constants main.js tests a touch against. Retune either and the art
+   * follows; there is no second copy of the geometry to forget.
+   *
+   * THE WIDTH COMES OUT OF THE HEIGHT AND THE VIEWPORT'S SHAPE, not out of a
+   * second fraction: a box given a width and a height in screen fractions is a
+   * box whose aspect changes with the phone, and a pedal that is a pedal on one
+   * device and a letterbox on the next is not a drawing, it is a stretch. So
+   * the height is fixed against the region and the width is whatever keeps the
+   * cell square-on — which is why this is recomputed in setFit, where the
+   * viewport's true aspect is known, and only there.
+   *
+   * IT DOES NOT MIRROR FOR LEFT-HAND DRIVE. Everything else in this file swaps
+   * sides with the driver; the brake stays bottom-left in Calais exactly as it
+   * does in Coventry, because readTouches does not swap either. The art has to
+   * agree with the hit test, not with the steering wheel.
+   */
+  const ctlRect = new Float32Array(12);       // x0,y0,x1,y1 per control, screen fx
+  let fillLevel = 1;
+  const layoutControls = (aspect) => {
+    const regW = PEDAL_W, regH = 1 - PEDAL_TOP;
+    const hy = CTL_HF * regH;                       // height, fraction of the screen
+    const cy = PEDAL_TOP + CTL_CYF * regH;
+    const put = (i, cx, cellW, cellH) => {
+      const wx = (hy * (cellW / cellH)) / aspect;   // ...and the width that keeps it square-on
+      ctlRect[i] = cx - wx * 0.5; ctlRect[i + 1] = cy - hy * 0.5;
+      ctlRect[i + 2] = cx + wx * 0.5; ctlRect[i + 3] = cy + hy * 0.5;
+    };
+    put(0, CTL_CXF * regW, PED_W, PED_H);           // the pedal, bottom left
+    put(4, 1 - CTL_CXF * regW, BTL_W, BTL_H);       // the bottle, bottom right
+    // THE FILL, inside the bottle's glass and cut from the same GLS_ fractions
+    // the glass is drawn at, so the liquid cannot land outside it whatever the
+    // bottle does. Its BOTTOM is pinned and its top rises with the level.
+    const bx = ctlRect[4], by = ctlRect[5], bw = ctlRect[6] - bx, bh = ctlRect[7] - by;
+    const gy1 = by + GLS_Y1 * bh, gh = (GLS_Y1 - GLS_Y0) * bh;
+    ctlRect[8] = bx + GLS_X0 * bw; ctlRect[9] = gy1 - fillLevel * gh;
+    ctlRect[10] = bx + GLS_X1 * bw; ctlRect[11] = gy1;
+  };
+
+  /**
+   * Write one screen-pinned quad's corners. No sx, no sy and no rotation: a
+   * fraction of the viewport is already a normalised device coordinate once it
+   * has been doubled and shifted, whatever shape the viewport is.
+   */
+  const placeCtl = (q) => {
+    const b = (q - Q_PEDAL) * 4;
+    const x0 = 2 * ctlRect[b] - 1, y0 = 1 - 2 * ctlRect[b + 1];
+    const x1 = 2 * ctlRect[b + 2] - 1, y1 = 1 - 2 * ctlRect[b + 3];
+    const j = q * 12;
+    pos[j] = x0; pos[j + 1] = y0; pos[j + 2] = 0;                 // top-left
+    pos[j + 3] = x1; pos[j + 4] = y0; pos[j + 5] = 0;             // top-right
+    pos[j + 6] = x1; pos[j + 7] = y1; pos[j + 8] = 0;             // bottom-right
+    pos[j + 9] = x0; pos[j + 10] = y1; pos[j + 11] = 0;           // bottom-left
+  };
+
   setFit(ART_A);
 
   /** Write one quad's four corners, rotated by `ang`, into the position array. */
@@ -1871,7 +2431,11 @@ export function buildCockpit(o = {}) {
   };
 
   const angles = new Float32Array(NQ);
-  const placeAll = () => { for (let q = 0; q < NQ; q++) placeQuad(q, angles[q]); };
+  const placeAll = () => {
+    for (let q = 0; q < NQ; q++) {
+      if (q >= Q_PEDAL) placeCtl(q); else placeQuad(q, angles[q]);
+    }
+  };
   placeAll();
 
   const posAttr = new BufferAttribute(pos, 3);
@@ -1961,7 +2525,7 @@ export function buildCockpit(o = {}) {
   // The clock's last shown state, so a frame where nothing ticked writes
   // nothing. Four digits and a tag; -1 means "not yet drawn".
   const lcdShown = new Int8Array(4).fill(-1);
-  let tagShown = -1, cdShown = -2;
+  let tagShown = -1, cdShown = -2, pedalShown = -1, bottleShown = -1;
 
   /** Tint one quad's four corners. The lamps and the gear numeral all work
    *  this way: one white drawing, a colour per state, twelve floats. */
@@ -1974,6 +2538,20 @@ export function buildCockpit(o = {}) {
   };
 
   /**
+   * SLIDE ONE QUAD ALONG A STRIP OF EQUAL CELLS. Four of the things in this
+   * cockpit change picture rather than position — the gear numeral, each clock
+   * digit, the pedal and the bottle — and all four are the same eight floats
+   * written into the u coordinates. One function, because four copies of this
+   * arithmetic is four places for an off-by-one to hide.
+   */
+  const pointU = (q, x0, cellW) => {
+    const u0 = x0 / ATLAS_W, u1 = (x0 + cellW) / ATLAS_W;
+    const b = q * 8;
+    uv[b] = u0; uv[b + 2] = u1; uv[b + 4] = u1; uv[b + 6] = u0;
+    uvAttr.needsUpdate = true;
+  };
+
+  /**
    * Point the gear quad at one of the numerals in the atlas.
    *
    * Clamped to the cells that exist rather than trusting the caller: a garage
@@ -1982,10 +2560,31 @@ export function buildCockpit(o = {}) {
    */
   const setGear = (n) => {
     const k = n < 0 ? 0 : n > DIG_N - 1 ? DIG_N - 1 : n;
-    const x0 = DIG_X + k * DIG_STRIDE;
-    const u0 = x0 / ATLAS_W, u1 = (x0 + DIG_W) / ATLAS_W;
-    const b = Q_GEAR * 8;
-    uv[b] = u0; uv[b + 2] = u1; uv[b + 4] = u1; uv[b + 6] = u0;
+    pointU(Q_GEAR, DIG_X + k * DIG_STRIDE, DIG_W);
+  };
+
+  /**
+   * HOW MUCH IS IN THE NITROUS BOTTLE, 0 to 1. THIS IS THE FILL.
+   *
+   * Boost is unlimited today so it is left at 1, and everything needed to make
+   * the bottle a meter is here and working: sixteen floats, no canvas touched,
+   * nothing allocated, nothing redrawn. Call it from a future boost budget, or
+   * put `boostLeft` on the state object update() already reads.
+   *
+   * The quad's bottom stays on the bottom of the glass and its top follows the
+   * level; the CELL is cropped by the same fraction from its bottom, so what is
+   * shown is the top of the drawing — which is where the liquid's surface is
+   * drawn. See drawLiquid.
+   */
+  const setBoostFill = (f) => {
+    fillLevel = f < 0 ? 0 : f > 1 ? 1 : f;
+    layoutControls(fitFor);
+    placeCtl(Q_FILL);
+    posAttr.needsUpdate = true;
+    const b = Q_FILL * 8;
+    const v0 = 1 - LIQ_Y / ATLAS_H;
+    const v1 = 1 - (LIQ_Y + LIQ_H * fillLevel) / ATLAS_H;
+    uv[b + 1] = v0; uv[b + 3] = v0; uv[b + 5] = v1; uv[b + 7] = v1;
     uvAttr.needsUpdate = true;
   };
 
@@ -1999,11 +2598,7 @@ export function buildCockpit(o = {}) {
    */
   const setDigit = (place, n) => {
     const k = n < 0 ? 0 : n > SEG_N - 1 ? SEG_N - 1 : n;
-    const x0 = SEG_X + k * SEG_STRIDE;
-    const u0 = x0 / ATLAS_W, u1 = (x0 + SEG_W) / ATLAS_W;
-    const b = (Q_LCD0 + place) * 8;
-    uv[b] = u0; uv[b + 2] = u1; uv[b + 4] = u1; uv[b + 6] = u0;
-    uvAttr.needsUpdate = true;
+    pointU(Q_LCD0 + place, SEG_X + k * SEG_STRIDE, SEG_W);
   };
 
   /**
@@ -2039,6 +2634,8 @@ export function buildCockpit(o = {}) {
   for (let k = 0; k < 4; k++) paintQuad(Q_LCD0 + k, LCD_LIT);
   paintQuad(Q_TAG, LCD_DIM);
   setCount(-1);
+  paintQuad(Q_FILL, LIQ_DIM);
+  setBoostFill(1);
 
   /**
    * Called once per frame, before rendering.
@@ -2140,6 +2737,32 @@ export function buildCockpit(o = {}) {
       paintQuad(Q_LAMP_R, st === 2 ? LAMP_BRAKE : st === 1 ? LAMP_BOOST : LAMP_OFF);
     }
 
+    // ---- the two controls in the corners ------------------------------------
+    //
+    // A CONTROL THAT DOES NOT MOVE WHEN YOU PRESS IT IS A PICTURE OF A CONTROL,
+    // and on a phone, where the thumb covers the thing it is pressing, the
+    // movement is most of how you know the touch registered at all.
+    //
+    // Both are a cell away in the atlas, so a press is EIGHT FLOATS and a
+    // release is eight more, written on the frame the state changes and on no
+    // other frame. Nothing is drawn, uploaded or allocated: the pressed pedal
+    // and the lit bottle were painted at boot and have been sitting in the
+    // texture ever since. The bottle's liquid takes a tint at the same moment,
+    // which is twelve floats more.
+    const brk = s.braking ? 1 : 0;
+    if (brk !== pedalShown) { pedalShown = brk; pointU(Q_PEDAL, PED_X + brk * PED_STRIDE, PED_W); }
+    const bst = s.boosting ? 1 : 0;
+    if (bst !== bottleShown) {
+      bottleShown = bst;
+      pointU(Q_BOTTLE, BTL_X + bst * BTL_STRIDE, BTL_W);
+      paintQuad(Q_FILL, bst ? LIQ_LIT : LIQ_DIM);
+    }
+    // AND THE LEVEL, IF ANYONE IS KEEPING ONE. Nothing sends this today; the
+    // day a boost budget exists, setting it here is all the plumbing the meter
+    // needs. Compared rather than assigned, so a state object that never sets
+    // it costs one comparison a frame and writes nothing.
+    if (s.boostLeft != null && s.boostLeft !== fillLevel) setBoostFill(s.boostLeft);
+
     // ---- the race: the clock on the radio and the lights on the dash --------
     //
     // WHAT THE GLASS SHOWS, AND WHEN. A lap timer that only ever shows the
@@ -2232,6 +2855,16 @@ export function buildCockpit(o = {}) {
     group,
     update,
     atlas: canvas,
-    stats: { tris: NQ * 2, calls: 1, verts: NQ * 4 },
+    // THE BOTTLE IS A METER WAITING FOR A NUMBER. Exposed so a boost budget can
+    // drive it without going through the per-frame state object, and so a
+    // harness can photograph a half-full bottle and prove the mechanism works
+    // before anything depends on it.
+    setBoostFill,
+    // The quad indices of the two controls, exposed for the same reason the
+    // atlas is: tools/pedalshots.mjs collapses each of them in turn and diffs
+    // the frames, which is the only way to measure what a control actually
+    // covers on the glass rather than what the arithmetic above intended.
+    stats: { tris: NQ * 2, calls: 1, verts: NQ * 4,
+             q: { pedal: Q_PEDAL, bottle: Q_BOTTLE, fill: Q_FILL } },
   };
 }

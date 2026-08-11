@@ -505,24 +505,28 @@ const M = await page.evaluate(async (trace) => {
   R.diff = {
     quietBefore: dq / dn,                     // must be ~0: proof the two renders really are identical
     peak: dpk, peakAt: dpkAt,
-    // The dump valve sweeps its band from 3.2kHz down to 900Hz over 300ms.
-    // That fall is the whole trick — the same burst at a fixed frequency is a
-    // hiss. Measured on the isolated event, above the engine's own range.
-    centEarly: centroid(d, Math.round((shiftAt + 0.06) * SR), 4096, 700, 9000),
-    centLate: centroid(d, Math.round((shiftAt + 0.30) * SR), 4096, 700, 9000),
+    // WHERE THE EVENT LIVES, AND IT IS A DIFFERENT QUESTION NOW. It used to be
+    // worth asking whether the sound swept DOWNWARDS, because the dump valve's
+    // falling 3.2kHz-to-900Hz band was the trick that made it read as escaping
+    // air. The valve has been deleted — Anthony did not like it, and a
+    // naturally-aspirated V8 has no compressor to vent — so the question is the
+    // opposite one: is what is left a LOW thump rather than a hiss. Measured
+    // across the whole audible range, not just above 700Hz, because a window
+    // that starts above the bark would report a confident centroid for a sound
+    // with no energy in the window at all.
+    centEarly: centroid(d, Math.round((shiftAt + 0.03) * SR), 2048, 100, 9000),
     stepEvent: maxStep(d, Math.round(shiftAt * SR), Math.round((shiftAt + 0.45) * SR)),
     stepSteady: maxStep(withShift.x, Math.round(0.6 * SR), Math.round(1.4 * SR)),
-    // CAN THE VALVE BE HEARD OVER THE WIND. A dump valve that measures as a
-    // beautiful descending sweep and sits 10dB under the road noise is a dump
-    // valve nobody will ever hear. Its own band, event against road.
-    // AT +200ms, AFTER THE BARK HAS GONE. Measured at +140ms the bark — which
-    // is a 500Hz thump and nothing to do with the valve — leaked into the
-    // band and the number said nothing about the valve at all. By 200ms the
-    // bark has been over for 90ms and the sweep is passing 1.5kHz.
+    // THE BARK'S OWN BAND AGAINST THE VALVE'S OLD ONE. 300-800Hz is where the
+    // 500Hz resonant thump sits. 1.4-2.2kHz at +200ms is exactly where the
+    // deleted valve used to be at that instant, and it is measured for the
+    // opposite reason it once was: it now has to stay DOWN. A pair of numbers
+    // rather than one, because "the bark is loud" and "the valve is gone" are
+    // two claims and a single band cannot carry both.
+    barkBand: bandRms(d, Math.round((shiftAt + 0.03) * SR), 2048, 300, 800),
+    barkRoad: bandRms(withShift.x, Math.round(1.0 * SR), 2048, 300, 800),
     valveBand: bandRms(d, Math.round((shiftAt + 0.20) * SR), 4096, 1400, 2200),
     roadBand: bandRms(withShift.x, Math.round(1.0 * SR), 4096, 1400, 2200),
-    // And the claim that actually matters for hearing it: the level in that
-    // band, in the FULL mix, before the shift against during it.
     mixBefore: bandRms(withShift.x, Math.round(1.0 * SR), 4096, 1400, 2200),
     mixDuring: bandRms(withShift.x, Math.round((shiftAt + 0.20) * SR), 4096, 1400, 2200),
   };
@@ -772,13 +776,13 @@ console.log(`  above baseline   ${S.durMs}ms, loudest at +${((S.peakAt - 1.5) * 
 console.log(`  isolated event   peak RMS ${D.peak.toFixed(4)} at ` +
             `+${((D.peakAt - 1.5) * 1000).toFixed(0)}ms, ` +
             `${D.quietBefore.toExponential(1)} before it`);
-console.log(`  its brightness   ${D.centEarly.toFixed(0)}Hz at +60ms -> ${D.centLate.toFixed(0)}Hz at +260ms`);
+console.log(`  its brightness   centroid ${D.centEarly.toFixed(0)}Hz at +30ms, 100Hz-9kHz`);
 console.log(`  largest step     ${D.stepEvent.toFixed(4)} in the event, ` +
             `${D.stepSteady.toFixed(4)} on the steady road`);
-console.log(`  valve vs road    ${(20 * Math.log10(D.valveBand / D.roadBand)).toFixed(1)}dB ` +
-            `in the 1.4-2.2kHz band the sweep is passing at +200ms`);
-console.log(`  that band lifts  ${(20 * Math.log10(D.mixDuring / D.mixBefore)).toFixed(1)}dB ` +
-            `in the full mix`);
+console.log(`  bark vs road     ${(20 * Math.log10(D.barkBand / D.barkRoad)).toFixed(1)}dB ` +
+            `in the 300-800Hz band the thump lives in`);
+console.log(`  the old valve    ${(20 * Math.log10(D.mixDuring / D.mixBefore)).toFixed(1)}dB ` +
+            `in 1.4-2.2kHz at +200ms — it used to lift this band, and must not now`);
 // NOT A DROPOUT. The threshold is deliberately modest because the event
 // CONTAINS a deliberate lift — the engine ducks to 55% for a moment, which is
 // the driver's foot coming off — so demanding a big rise here would be
@@ -787,9 +791,15 @@ console.log(`  that band lifts  ${(20 * Math.log10(D.mixDuring / D.mixBefore)).t
 // the failure where a gearchange is a hole in the sound.
 ok(S.ratio > 1.15, 'the upshift is a lift and a bark, not a hole in the sound',
    `${S.ratio.toFixed(2)}x baseline over the 300ms window`);
-ok(D.mixDuring > D.mixBefore * 1.41,
-   'the valve lifts its own band by more than 3dB in the finished mix, so it is audible',
-   `${(20 * Math.log10(D.mixDuring / D.mixBefore)).toFixed(1)}dB`);
+ok(D.barkBand > D.barkRoad * 1.41,
+   'the bark clears the road by more than 3dB in its own band, so it is audible',
+   `${(20 * Math.log10(D.barkBand / D.barkRoad)).toFixed(1)}dB in 300-800Hz`);
+// THE DELETION HAS ITS OWN TEST, because "we removed it" is a claim about the
+// build that ships, not about the edit that was made. Put the air block back in
+// upshift() and this goes red.
+ok(D.mixDuring < D.mixBefore * 1.20,
+   'THE DUMP VALVE IS GONE: its old band no longer lifts when the gear changes',
+   `${(20 * Math.log10(D.mixDuring / D.mixBefore)).toFixed(1)}dB in 1.4-2.2kHz at +200ms`);
 ok(S.durMs >= 60 && S.durMs <= 900, 'it lasts like an event, not a click and not a drone',
    `${S.durMs}ms above baseline`);
 ok(D.quietBefore < 1e-6,
@@ -797,8 +807,8 @@ ok(D.quietBefore < 1e-6,
    `${D.quietBefore.toExponential(1)} RMS before, ${D.peak.toFixed(4)} in it`);
 ok(D.stepEvent < D.stepSteady * 3.5, 'it is a sound, not a discontinuity',
    `largest step ${D.stepEvent.toFixed(4)} vs ${D.stepSteady.toFixed(4)} steady`);
-ok(D.centLate < D.centEarly * 0.8, 'the dump valve sweeps DOWN, which is what makes it air',
-   `${D.centEarly.toFixed(0)}Hz -> ${D.centLate.toFixed(0)}Hz`);
+ok(D.centEarly < 1200, 'what is left is a low thump, not a hiss',
+   `centroid ${D.centEarly.toFixed(0)}Hz across 100Hz-9kHz`);
 ok(NS.ratio < 1.15,
    'NEGATIVE CONTROL: with no gearchange the same detector finds no transient',
    `${NS.ratio.toFixed(2)}x baseline, ${NS.durMs}ms`);

@@ -616,8 +616,8 @@ export function createAudio(opts) {
   // after startup: about six nodes, three or four times a lap.
 
   /**
-   * THE UPSHIFT. Three things at once, and it is the three together that make
-   * it read as a gearchange rather than as a noise:
+   * THE UPSHIFT. Two things at once, and it is the two together that make it
+   * read as a gearchange rather than as a noise:
    *
    *   THE LIFT. The engine ducks to a third for 45ms and comes back over
    *   250ms. Our throttle is always on, so this is the only moment in the game
@@ -627,11 +627,16 @@ export function createAudio(opts) {
    *   THE BARK. Unburnt mixture going off in the pipe. A resonant thump at
    *   500Hz, 100ms, gone.
    *
-   *   THE DUMP VALVE — the one that was asked for by name, "the dump sound boy
-   *   racers have when they race off and take their foot off the pedal". It is
-   *   a bandpass sweeping 3.2kHz down to 900Hz over 300ms with a fast attack:
-   *   pressurised air escaping, pitch falling as the pressure does. The sweep
-   *   is the whole trick — the same noise burst at a fixed frequency is a hiss.
+   * THE DUMP VALVE WAS THE THIRD AND HAS BEEN REMOVED. Anthony's verdict after
+   * driving with it: "the change gear dump is not good that's for sure and
+   * could be just removing that makes it sound better." He is right for a
+   * reason past taste. A dump valve vents a TURBOCHARGER's boost pressure when
+   * the throttle plate shuts; an engine with no compressor has nothing to vent
+   * and physically cannot make the sound. This car is a naturally-aspirated V8
+   * and its nitrous is chemical, not pressurised intake air — so the whistle
+   * was announcing hardware the car does not have, on top of not being liked.
+   * What is left is the lift and the bark, which is what a big atmospheric V8
+   * actually does between gears.
    *
    * The pitch drop comes free: shifting up raises the gear's ceiling, st.rev
    * falls, and the oscillators follow it down on the pitch time constant.
@@ -641,44 +646,34 @@ export function createAudio(opts) {
     const d = g.duck.gain;
     d.cancelScheduledValues(t);
     d.setValueAtTime(d.value, t);
-    d.linearRampToValueAtTime(0.55, t + 0.045);
-    d.linearRampToValueAtTime(1, t + 0.26);
+    // A SHORTER LIFT THAN THE VALVE VERSION HAD, and that is a consequence of
+    // the deletion rather than a taste change. With the valve in, its 440ms of
+    // escaping air covered the duck, so a long 260ms lift cost nothing. With
+    // the valve gone the duck is naked, and measured over the 300ms the ear
+    // integrates the gearchange came out at 0.88x the steady road: a HOLE in
+    // the sound, which is the one shape a gearchange must never be. 170ms is
+    // also nearer what a quick upshift really takes.
+    d.linearRampToValueAtTime(0.55, t + 0.035);
+    d.linearRampToValueAtTime(1, t + 0.17);
 
+    // THE BARK LANDS IN THE DIP, NOT ON TOP OF IT. It used to start on the same
+    // millisecond as the lift, so the two events overlapped and then the sound
+    // fell away with nothing in it. Delayed to +25ms it arrives as the engine
+    // is ducking, which is both the right order physically — the unburnt charge
+    // has to travel down the pipe before it goes off — and what makes the whole
+    // thing read as one gesture instead of a thump followed by a gap.
     const bark = ctx.createBufferSource();
     bark.buffer = g.noise; bark.loop = true;
     const bf = ctx.createBiquadFilter();
     bf.type = 'lowpass'; bf.frequency.value = 500; bf.Q.value = 7;
     const bg = ctx.createGain();
-    bg.gain.setValueAtTime(0.0001, t);
-    bg.gain.exponentialRampToValueAtTime(1.15 * strength, t + 0.008);
-    bg.gain.exponentialRampToValueAtTime(0.0008, t + 0.10);
-    bg.gain.setValueAtTime(0, t + 0.11);
+    bg.gain.setValueAtTime(0.0001, t + 0.02);
+    bg.gain.exponentialRampToValueAtTime(1.9 * strength, t + 0.035);
+    bg.gain.exponentialRampToValueAtTime(0.55 * strength, t + 0.11);
+    bg.gain.exponentialRampToValueAtTime(0.0008, t + 0.20);
+    bg.gain.setValueAtTime(0, t + 0.21);
     bark.connect(bf).connect(bg).connect(g.master);
-    bark.start(t); bark.stop(t + 0.12);
-
-    // THE ENVELOPE IS FOUR SEGMENTS, NOT TWO, and that is not decoration.
-    // A single exponential from the peak down to silence over 285ms spends
-    // almost the whole of that 285ms near the bottom: measured, the valve was
-    // at 1.5% of its peak by +200ms, so the 3.2kHz-to-900Hz sweep that is the
-    // entire point of the sound was happening in silence. Attack, a slow
-    // plateau while the pressure bleeds off, then a tail — which is also what
-    // a real valve does, because a plenum does not empty exponentially into a
-    // vacuum. The measured brightness now falls 2.9kHz to 1.5kHz across it.
-    const air = ctx.createBufferSource();
-    air.buffer = g.noise; air.loop = true;
-    const af = ctx.createBiquadFilter();
-    af.type = 'bandpass'; af.Q.value = 3.5;
-    af.frequency.setValueAtTime(3400, t + 0.02);
-    af.frequency.exponentialRampToValueAtTime(900, t + 0.40);
-    const ag = ctx.createGain(), pk = 2.6 * strength;
-    ag.gain.setValueAtTime(0.0001, t + 0.02);
-    ag.gain.exponentialRampToValueAtTime(pk, t + 0.05);
-    ag.gain.exponentialRampToValueAtTime(pk * 0.5, t + 0.22);
-    ag.gain.exponentialRampToValueAtTime(pk * 0.07, t + 0.36);
-    ag.gain.exponentialRampToValueAtTime(0.0008, t + 0.44);
-    ag.gain.setValueAtTime(0, t + 0.45);
-    air.connect(af).connect(ag).connect(g.master);
-    air.start(t + 0.02); air.stop(t + 0.46);
+    bark.start(t + 0.02); bark.stop(t + 0.22);
   }
 
   /** A start light. Square, because a start light is not a musical instrument,

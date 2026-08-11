@@ -29,6 +29,21 @@ await p.waitForTimeout(600);
 const FROM = 75, TO = 190;
 const r = await p.evaluate(async ({ FROM, TO }) => {
   const R = window.RACER, MPH = 0.9633;
+  // START THE RACE FIRST. On the grid and through the countdown main.js zeroes
+  // st.speed every frame — the throttle is dead on the line by design — so a
+  // rig that loads the page and starts assigning speeds is timing a parked car.
+  // This one waited for a speed the car could never reach and hung.
+  R.startRace();
+  await new Promise((done, fail) => {
+    const t0 = R.st.simT + R.consts.COUNTDOWN + 1, give = performance.now() + 60000;
+    const step = () => {
+      if (R.st.simT >= t0) return done();
+      if (performance.now() > give) return fail(new Error('the countdown never finished'));
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  });
+  if (R.race.state !== 'racing') throw new Error(`the race is '${R.race.state}', not racing`);
   const settle = (s) => new Promise((done) => {
     const t = R.st.simT + s;
     const poll = () => R.st.simT >= t ? done() : requestAnimationFrame(poll);

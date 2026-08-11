@@ -21,6 +21,24 @@ await p.waitForTimeout(600);
 
 const r = await p.evaluate(async () => {
   const R = window.RACER, MPH = 0.9633, ROAD_W = R.consts.ROAD_W, STRAY = R.consts.STRAY_MAX;
+  // START THE RACE FIRST, OR NONE OF THIS MEASURES ANYTHING. On the grid and
+  // through the countdown main.js sets st.speed to zero every frame — the
+  // throttle is dead on the line by design — and that branch runs before
+  // tune.freeze, so freezing does not save you. A rig that loads the page and
+  // starts assigning speeds is driving a parked car. This one came back with
+  // 0 mph in every row INCLUDING ITS OWN CONTROL, which reads like a
+  // catastrophic off-road penalty rather than like a broken tool.
+  R.startRace();
+  await new Promise((done, fail) => {
+    const t = R.st.simT + R.consts.COUNTDOWN + 1, give = performance.now() + 60000;
+    const step = () => {
+      if (R.st.simT >= t) return done();
+      if (performance.now() > give) return fail(new Error('the countdown never finished'));
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  });
+  if (R.race.state !== 'racing') throw new Error(`the race is '${R.race.state}', not racing`);
   // Hold the car at a fixed lateral offset by rewriting st.x every frame — the
   // physics clamps and the autopilot would both fight a one-off assignment.
   // Pin the offset THROUGH THE GAME, via tune.holdX, which the frame loop

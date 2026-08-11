@@ -24,6 +24,21 @@ await p.waitForTimeout(1500);
 
 const r = await p.evaluate(async () => {
   const R = window.RACER, MPH = 0.9633;
+  // START THE RACE FIRST. On the grid and through the countdown main.js zeroes
+  // st.speed every frame — the throttle is dead on the line by design — so a
+  // rig that loads the page and starts assigning speeds is timing a parked car.
+  // This one waited for a speed the car could never reach and hung.
+  R.startRace();
+  await new Promise((done, fail) => {
+    const t0 = R.st.simT + R.consts.COUNTDOWN + 1, give = performance.now() + 60000;
+    const step = () => {
+      if (R.st.simT >= t0) return done();
+      if (performance.now() > give) return fail(new Error('the countdown never finished'));
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  });
+  if (R.race.state !== 'racing') throw new Error(`the race is '${R.race.state}', not racing`);
   const settle = (secs) => new Promise((done, fail) => {
     const t = R.st.simT + secs, give = performance.now() + secs * 8000 + 10000;
     const poll = () => R.st.simT >= t ? done()
@@ -32,6 +47,27 @@ const r = await p.evaluate(async () => {
   });
   R.tune.holdX = 0;
   const reset = () => { R.st.speed = 0; R.st.gear = 0; R.pedal.brake = false; R.pedal.boost = false; };
+  // A FRESH RACE BEFORE EACH STANDING START. The distance trials below measure
+  // st.dist across twelve seconds, and by the time they run the ceiling sweep
+  // above has already driven the car most of a race length down the road — so
+  // one of them straddled the finish, the race went back to the grid underneath
+  // it, and the trial reported having travelled MINUS eleven thousand units. A
+  // negative distance is a tool telling you it does not know what it measured.
+  // Putting all three trials on the same fresh grid also makes them comparable,
+  // which up to now was assumed rather than arranged.
+  const arm = async () => {
+    R.startRace();
+    const t = R.st.simT + R.consts.COUNTDOWN + 0.5, give = performance.now() + 60000;
+    await new Promise((done, fail) => {
+      const step = () => {
+        if (R.st.simT >= t) return done();
+        if (performance.now() > give) return fail(new Error('the countdown never finished'));
+        requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    });
+    reset();
+  };
 
   // 1. each gear's ceiling, held wide open
   // START THE CAR NEAR THE GEAR'S OWN CEILING, not at a standstill. The
@@ -58,21 +94,25 @@ const r = await p.evaluate(async () => {
   // there, so the measurement drowned the thing it was measuring. A standing
   // start against a fixed clock is what a race actually rewards.
   const drive = async (shiftAt) => {
-    reset();
+    await arm();
     const d0 = R.st.dist, t0 = R.st.simT;
     let guard = 0;
     while (R.st.simT - t0 < 12 && guard++ < 300) {
       await settle(0.2);
       if (R.st.rev >= shiftAt && R.st.gear < 4) R.st.gear++;
     }
-    return R.st.dist - d0;
+    const covered = R.st.dist - d0;
+    // A standing start cannot go backwards. If it did, the race reset under the
+    // trial and the number is meaningless — say so rather than print it.
+    if (covered < 0) throw new Error(`a twelve-second standing start covered ${covered.toFixed(0)} units`);
+    return covered;
   };
   const atRedline = await drive(0.995);
   const atPeak = await drive(0.88);
   const tooEarly = await drive(0.55);
 
   // 3. never shifting at all
-  reset();
+  await arm();
   await settle(20);
   const never = { mph: R.st.speed * MPH, gear: R.st.gear + 1 };
 

@@ -1,17 +1,26 @@
-// LOOK AT THE TWO CONTROLS, IN BOTH STATES, AND MEASURE THEM ON THE GLASS.
+// LOOK AT THE BRAKE PEDAL, IN BOTH STATES, AND MEASURE IT ON THE GLASS.
 //
-// The brake pedal and the nitrous bottle are drawn into the cockpit atlas and
-// pinned to the screen from PEDAL_TOP and PEDAL_W — the same two numbers the
-// touch test uses. This photographs them at the owner's phone resolution
-// (1440x720 device pixels: a 720x360 CSS viewport at dpr 2) and then MEASURES
-// what landed, rather than trusting the arithmetic that placed it.
+// The brake pedal is drawn into the cockpit atlas and pinned to the screen from
+// PEDAL_TOP and PEDAL_W — the same two numbers the touch test uses. This
+// photographs it at the owner's phone resolution (1440x720 device pixels: a
+// 720x360 CSS viewport at dpr 2) and then MEASURES what landed, rather than
+// trusting the arithmetic that placed it.
+//
+// THERE WAS A NITROUS BOTTLE IN THE OTHER CORNER AND THIS MEASURED THAT TOO.
+// It has gone: a bottle is cargo and can only ever sit on top of a dashboard,
+// so the boost hint is now a toggle switch built into the fascia and the level
+// it used to show is a proper gauge in the sub-dial. Neither is screen-pinned,
+// so neither belongs in a tool about the touch corners — both are measured by
+// tools/nosdash.mjs instead. BOOST IS STILL A TOUCH ANYWHERE IN THE
+// BOTTOM-RIGHT REGION, unchanged; tools/controls.mjs is what proves that, and
+// it always was.
 //
 // HOW THE MEASUREMENT WORKS. The frame is rendered twice: once as it ships, and
-// once with the three control quads collapsed to zero area. Every pixel that
-// differs between the two IS the control, so the bounding box of the difference
-// is the control's true on-screen footprint in device pixels. Nothing is
-// derived from the constants that placed it — if the placement is wrong, the
-// box is wrong, and the box is what gets printed.
+// once with the pedal's quad collapsed to zero area. Every pixel that differs
+// between the two IS the pedal, so the bounding box of the difference is its
+// true on-screen footprint in device pixels. Nothing is derived from the
+// constants that placed it — if the placement is wrong, the box is wrong, and
+// the box is what gets printed.
 //
 //   node tools/pedalshots.mjs
 import { chromium } from '/root/svu-run/node_modules/playwright/index.mjs';
@@ -156,7 +165,7 @@ await page.waitForTimeout(300);
 const before = PNG.sync.read(await page.screenshot());
 
 const boxes = {};
-for (const which of ['pedal', 'bottle', 'fill']) {
+for (const which of ['pedal']) {
   await page.evaluate((w) => {
     // Collapse ONE control quad to zero area, leaving everything else alone.
     const R = window.RACER;
@@ -208,12 +217,11 @@ for (const k of Object.keys(boxes)) {
     return { x0: b.left * dpr, x1: b.right * dpr, y0: b.top * dpr, text: el.textContent.length };
   }, DPR);
   const clearL = boxes.pedal ? n.x0 - boxes.pedal.x1 : 0;
-  const clearR = boxes.bottle ? boxes.bottle.x0 - n.x1 : 0;
+  const clearR = 1;      // nothing of this file's is in the right-hand corner now
   console.log(`\n  THE STANDING NOTE: ${n.text} characters, ` +
               `x ${n.x0.toFixed(0)}..${n.x1.toFixed(0)}, top ${n.y0.toFixed(0)}`);
-  console.log(`  clear of the pedal by ${clearL.toFixed(0)} px, ` +
-              `of the bottle by ${clearR.toFixed(0)} px` +
-              (clearL > 0 && clearR > 0 ? '' : '   <-- IT CROSSES A CONTROL'));
+  console.log(`  clear of the pedal by ${clearL.toFixed(0)} px` +
+              (clearL > 0 ? '' : '   <-- IT CROSSES THE PEDAL'));
 }
 
 // ---- and does the art stay inside the touch region it is hinting at? -------
@@ -227,52 +235,12 @@ const inside = (b, left) => {
   const x0 = b.x0 / DW, x1 = (b.x1 + 1) / DW, y0 = b.y0 / DH;
   return y0 >= reg.top && (left ? x1 <= reg.w : x0 >= 1 - reg.w);
 };
-for (const [k, left] of [['pedal', true], ['bottle', false], ['fill', false]]) {
+for (const [k, left] of [['pedal', true]]) {
   const ok = inside(boxes[k], left);
   if (!ok) bad++;
   console.log(`  ${k.padEnd(7)} ${ok ? 'inside the region' : 'OUTSIDE THE REGION  <-- WRONG'}`);
 }
 
-// ---- the bottle is a meter: prove it before anything depends on it ---------
-//
-// Nothing spends boost yet, so the bottle ships full. This drives the fill
-// mechanism directly and photographs the result, because "it can take a level
-// later" is a claim and a half-empty bottle in a PNG is not.
-{
-  const levels = [1, 0.6, 0.25];
-  const seen = [];
-  for (const f of levels) {
-    await page.evaluate((v) => window.RACER.cockpit.setBoostFill(v), f);
-    await page.waitForTimeout(250);
-    const png = PNG.sync.read(await page.screenshot());
-    const b = boxes.bottle;
-    crop(png, b.x0 - 12, b.y0 - 12, b.w + 24, b.h + 24, `pedal-fill-${String(f).replace('.', '')}`, 3);
-    // MEASURE THE LIQUID, and only the liquid. The first version of this test
-    // matched anything blue down the middle of the bottle and duly counted the
-    // bottle's own body as well, so it printed 179 pixels of liquid at every
-    // level and called a working meter broken. The liquid is the one thing in
-    // the frame that is bright cyan — g above 150 and b above 170 with r below
-    // 190 — which the body (53,120,156) and the label (232,236,240) are not.
-    let top = -1, bot = -1;
-    for (let y = b.y0; y <= b.y1; y++) {
-      const i = (y * png.width + ((b.x0 + b.x1) >> 1)) * 4;
-      const d = png.data;
-      const lit = d[i + 1] > 150 && d[i + 2] > 170 && d[i] < 190;
-      if (lit) { if (top < 0) top = y; bot = y; }
-    }
-    seen.push({ f, h: top < 0 ? 0 : bot - top + 1 });
-  }
-  await page.evaluate(() => window.RACER.cockpit.setBoostFill(1));
-  console.log('\n  THE FILL LEVEL, measured down the middle of the glass');
-  const full = seen[0].h;
-  for (const s of seen) {
-    const want = full * s.f;
-    const off = Math.abs(s.h - want);
-    if (off > Math.max(6, full * 0.10)) bad++;
-    console.log(`  ${(s.f * 100).toFixed(0).padStart(3)}% full   ${String(s.h).padStart(3)} px of liquid` +
-                `   (${want.toFixed(0)} expected)${off > Math.max(6, full * 0.10) ? '   <-- WRONG' : ''}`);
-  }
-}
 await page.close();
 
 // ---- A DIFFERENT SHAPED SCREEN, because the art is screen-pinned and the
@@ -291,7 +259,7 @@ for (const s of [{ w: 800, h: 450, name: '16:9' }, { w: 512, h: 300, name: '1.7:
     const R = window.RACER;
     const g = R.cockpit.group.children[0].geometry.getAttribute('position');
     const out = {};
-    for (const k of ['pedal', 'bottle']) {
+    for (const k of ['pedal']) {
       const q = R.cockpit.stats.q[k];
       const x0 = g.array[q * 12], y0 = g.array[q * 12 + 1];
       const x1 = g.array[q * 12 + 3], y1 = g.array[q * 12 + 7];
@@ -303,13 +271,11 @@ for (const s of [{ w: 800, h: 450, name: '16:9' }, { w: 512, h: 300, name: '1.7:
   });
   await p2.screenshot({ path: __j(OUT, `pedal-aspect-${s.w}x${s.h}.png`) });
   const pxa = (b) => `${((b.fx1 - b.fx0) * s.w).toFixed(0)}x${((b.fy1 - b.fy0) * s.h).toFixed(0)}`;
-  const ok = r.pedal.fx1 <= r.reg.w && r.bottle.fx0 >= 1 - r.reg.w
-             && r.pedal.fy0 >= r.reg.top && r.bottle.fy0 >= r.reg.top;
+  const ok = r.pedal.fx1 <= r.reg.w && r.pedal.fy0 >= r.reg.top;
   if (!ok) bad++;
-  console.log(`\n  ${s.name.padEnd(13)} ${s.w}x${s.h}   pedal ${pxa(r.pedal)} px, bottle ${pxa(r.bottle)} px` +
-              `   ${ok ? 'both inside the region' : 'OUT OF THE REGION  <-- WRONG'}`);
+  console.log(`\n  ${s.name.padEnd(13)} ${s.w}x${s.h}   pedal ${pxa(r.pedal)} px` +
+              `   ${ok ? 'inside the region' : 'OUT OF THE REGION  <-- WRONG'}`);
   console.log(`                 pedal x ${(r.pedal.fx0 * 100).toFixed(1)}..${(r.pedal.fx1 * 100).toFixed(1)}%,` +
-              ` bottle x ${(r.bottle.fx0 * 100).toFixed(1)}..${(r.bottle.fx1 * 100).toFixed(1)}%,` +
               ` y ${(r.pedal.fy0 * 100).toFixed(1)}..${(r.pedal.fy1 * 100).toFixed(1)}%`);
   await p2.close();
 }

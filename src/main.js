@@ -144,7 +144,11 @@ const tune = { si: 3, maxSpeed: SPEED_STEPS[3], driverX: 0, pitch: 1,
                // outside lasts exactly one frame.
                studio: null,
                // null to drive normally; a number pins the lateral position
-               holdX: null };   // swept against ref/target-high.png  // driverX set below; pitch is 0..1 so the fix can be A/B measured
+               holdX: null,
+               // null to let the nitrous drain and refill normally; a number
+               // 0..1 pins the bottle, for photographing the gauge at a known
+               // reading or for a rig that needs boost to last the whole run.
+               holdBoost: null };   // swept against ref/target-high.png  // driverX set below; pitch is 0..1 so the fix can be A/B measured
 
 /** Multiplies the displayed number only. The physics is in world units; this
  *  is so the readout says something a driver recognises. Anthony is in the UK
@@ -2135,6 +2139,10 @@ function startRace() {
   race.state = 'countdown';
   race.t = 0; race.elapsed = 0; race.topSpeed = 0; race.fresh = false;
   st.dist = RACE_FROM - GRID_BACK; st.speed = 0; st.gear = 0; st.x = 0; st.steer = 0;
+  // A FULL BOTTLE ON EVERY GRID. Carrying an empty one over from the last lap
+  // would make the restart depend on how the previous attempt ended, and a
+  // player who crashed out of a bad lap would be punished twice for it.
+  st.boostLeft = 1; boostArmed = true;
   pedal.brake = false; pedal.boost = false;
 }
 
@@ -2207,7 +2215,7 @@ const cockpit = buildCockpit({ pencil: PENCIL, palette: PAL, ink: INK, driverX: 
 
 /** Filled in and handed to the cockpit each frame; never reallocated. */
 const COCKPIT_STATE = { speed: 0, maxSpeed: 0, steer: 0, boosting: false, braking: false,
-                        rev: 0, gear: 0, gears: GEARS.length, race: null };
+                        boostLeft: 1, rev: 0, gear: 0, gears: GEARS.length, race: null };
 
 const car = new Group();
 car.add(bodyKit.group);
@@ -2237,7 +2245,27 @@ const st = {
   // which is exactly how two speed assertions went red on a working build.
   simT: 0,
   off: 0,         // 0 on the tarmac, 1 at the far edge of what you can stray to
+  // NITROUS REMAINING, 1 = a full bottle. Drains only while the boost is
+  // actually delivering, and refills only on the tarmac — so running wide costs
+  // you the refill as well as the speed. The cockpit's right-hand dial and the
+  // toggle switch under the lamp both read this.
+  boostLeft: 1,
 };
+
+// A full bottle is BOOST_DRAIN seconds of boost; an empty one takes
+// BOOST_REFILL seconds of clean tarmac to come back. Between them they set how
+// much of a lap can be spent boosting once the bottle settles into its rhythm:
+// t / BOOST_DRAIN = (lap - t) / BOOST_REFILL, which on his 60s lap is about
+// seventeen seconds. A straight's worth, not a throttle. Both numbers are
+// measured rather than assumed in tools/boost.mjs.
+const BOOST_DRAIN = 10;
+const BOOST_REFILL = 25;
+// Once empty the bottle will not deliver again until it has this much back in
+// it. Without the latch the boost stutters on and off many times a second at
+// zero, because a single frame of refill is enough to re-engage and a single
+// frame of drain empties it again.
+const BOOST_ARM = 0.08;
+let boostArmed = true;
 
 // ---- input ---------------------------------------------------------------
 //
@@ -2782,7 +2810,16 @@ function frame(now) {
   st.steer += (want - st.steer) * Math.min(1, dt * STEER_LAG);
 
   const braking = pedal.brake || keys.Space || keys.ArrowDown;
-  const boosting = !braking && (pedal.boost || keys.ShiftLeft || keys.ShiftRight);
+  const wantBoost = !braking && (pedal.boost || keys.ShiftLeft || keys.ShiftRight);
+  // THE BOTTLE DECIDES, NOT THE BUTTON. `boostArmed` latches off at empty and
+  // does not come back until there is BOOST_ARM in the bottle, which is what
+  // stops the boost flickering on and off every other frame at zero. Held on
+  // the grid the button costs nothing — the engine is dead there anyway, and
+  // draining the bottle before the lights go out would punish the player for
+  // the very touch that starts the race.
+  if (st.boostLeft <= 0) boostArmed = false;
+  else if (st.boostLeft >= BOOST_ARM) boostArmed = true;
+  const boosting = wantBoost && boostArmed && !held;
   // THE CEILING IS NOW THE GEAR'S, NOT THE CAR'S. `top` stays the car's, since
   // the camera, the field of view and the cornering margin all read from it and
   // none of them care what gear you are in.
@@ -2939,6 +2976,27 @@ function frame(now) {
     if (st.speed < 0) st.speed = 0;
   }
 
+  // THE BOTTLE, settled here rather than up with the throttle so that it reads
+  // THIS frame's `st.off` instead of last frame's. Refilling only on the tarmac
+  // means a trip through the grass costs the refill as well as the speed, which
+  // is the whole reason to stay on the road once the lap timer is the point.
+  // `tune.holdBoost` pins the level for a harness; the write has to happen in
+  // here, like `holdX`, because an external write to `st.boostLeft` loses the
+  // race with this line.
+  // IT REFILLS WHEN THE BUTTON IS UP, not merely when no boost is coming out.
+  // The difference is the whole feature. With the first version — refill
+  // whenever `boosting` was false — a player holding the button down on an
+  // empty bottle got refilled to the BOOST_ARM point, which re-armed the latch,
+  // which spent it again in under a second, forever: measured at 2 pulses in 5
+  // seconds by tools/boost.mjs, a lurching on-off-on that the engine note and
+  // the dash lamp both follow. Letting go is now what recharges it, which is
+  // also the rule every player already expects.
+  if (!tune.freeze) {
+    if (boosting) st.boostLeft = Math.max(0, st.boostLeft - dt / BOOST_DRAIN);
+    else if (st.off === 0 && !wantBoost) st.boostLeft = Math.min(1, st.boostLeft + dt / BOOST_REFILL);
+  }
+  if (tune.holdBoost !== null) st.boostLeft = tune.holdBoost;
+
   // ---- THE GATE. Everything above this line is the car; everything below is
   // the picture. On a capped frame we stop here, having advanced the physics
   // for a tenth of a millisecond, and skip the road rewrite, the seven
@@ -3052,6 +3110,7 @@ function frame(now) {
     COCKPIT_STATE.steer = st.steer;
     COCKPIT_STATE.boosting = boosting;
     COCKPIT_STATE.braking = braking;
+    COCKPIT_STATE.boostLeft = st.boostLeft;
     COCKPIT_STATE.rev = st.rev;
     COCKPIT_STATE.gear = st.gear;
     // Passed rather than assumed, because the garage will sell engines with
@@ -3215,5 +3274,6 @@ window.RACER = {
   race, startRace,
   audio,
   consts: { ROAD_W, STEER_RATE, BRAKE_GRIP, CORNER_AUTHORITY, SPEED_STEPS, SEG_LEN, STRAY_MAX,
-            GEARS, REDLINE, MPH, RACE_FROM, RACE_LEN, COUNTDOWN, PEDAL_TOP, PEDAL_W },
+            GEARS, REDLINE, MPH, RACE_FROM, RACE_LEN, COUNTDOWN, PEDAL_TOP, PEDAL_W,
+            BOOST_DRAIN, BOOST_REFILL, BOOST_ARM, BOOST_TOP },
 };

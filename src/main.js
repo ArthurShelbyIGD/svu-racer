@@ -2181,7 +2181,34 @@ const race = {
  * null, and a thrown storage error during boot would take the whole game down
  * for the sake of a lap time.
  */
-const BEST_KEY = 'svu-racer-best-v1';
+/**
+ * THE VERSION IN THIS KEY IS LOAD-BEARING. Bumping it is how a lap time set on
+ * a track that no longer exists gets thrown away, on every device at once,
+ * without a button and without asking anyone anything.
+ *
+ * v1 -> v2 when the broken bridge, the tunnel and the Armco went in and the
+ * nitrous stopped being infinite. Anthony's own best was a 0:52.2 set with
+ * unlimited boost on a layout with no bridge in it — unbeatable, and not
+ * because it was quick. His words: "it's the old one with unlimited nitro so
+ * it's false."
+ *
+ * THE REASON TO DO IT HERE RATHER THAN BY CLEARING HIS PHONE IS EVERYONE ELSE.
+ * The moment this goes out to other devices for testing, anyone who opened the
+ * old link is carrying a time from a different track, and it comes back as
+ * feedback measured against a baseline that no longer exists. You would find
+ * out from a lap time that looks impossible, weeks later, and spend the
+ * afternoon looking for the bug that made the car quick.
+ *
+ * SO: BUMP THIS WHENEVER THE LAP CHANGES SHAPE OR THE CAR CHANGES SPEED. A
+ * stale record is worse than no record — no record is obviously empty, and a
+ * stale one looks like data.
+ *
+ * WHEN THERE IS MORE THAN ONE TRACK this becomes a key per track rather than a
+ * single version, and the version stays alongside it for exactly the reason it
+ * exists now. Not built yet, deliberately: there is one track, and a per-track
+ * store with one entry in it is a guess about a shape that has not turned up.
+ */
+const BEST_KEY = 'svu-racer-best-v2';
 function loadBests() {
   try {
     const raw = localStorage.getItem(BEST_KEY);

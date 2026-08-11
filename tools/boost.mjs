@@ -95,7 +95,16 @@ const r = await p.evaluate(async () => {
   }
 
   // ---- 3. NO REFILL IN THE GRASS ------------------------------------------
+  //
+  // PUT IT SOMEWHERE IT CANNOT FLY. The bottle does not refill off the road,
+  // and it DOES refill in mid-air, because a car in the air is not in the
+  // grass. Both are right. But this section runs the car for six seconds —
+  // over twelve hundred units — and it had wandered far enough down the lap to
+  // cross the broken bridge, take off with the throttle pinned, and refill on
+  // the way over. It then reported the grass refilling the bottle, which is a
+  // true measurement of the wrong stretch of road.
   R.st.boostLeft = 0.2;
+  R.st.dist = 1200;                    // clear of the bridge at 6,666 and the tunnel at 9,120
   R.tune.holdX = ROAD_W + 0.6 * (STRAY - ROAD_W);
   await sim(6);
   out.grass = { after: R.st.boostLeft, off: R.st.off };

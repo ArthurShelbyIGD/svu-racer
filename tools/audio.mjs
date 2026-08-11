@@ -560,27 +560,70 @@ const M = await page.evaluate(async (trace) => {
   // summing raw magnitudes counted that hiss as burble: the V12, which has
   // essentially no half-order content by construction, came out at 0.21
   // against the V8's 0.37 and the two were not distinguishable. The floor is
-  // the median of the bins 8 to 24 away, which is far enough not to include
-  // the harmonic's own skirt and near enough to be the same noise.
-  const above = (mag, bin) => {
+  // the median of a band either side of the harmonic, far enough out not to
+  // include its own skirt and near enough to be the same noise.
+  //
+  // AND THAT BAND IS NOW SET IN UNITS OF THE HARMONIC SPACING. IT USED TO BE A
+  // FIXED 8 TO 24 BINS, WHICH WAS A HIDDEN DEPENDENCE ON THE ENGINE'S PITCH,
+  // and dropping the V8's revs is what exposed it. At 780-6400rpm the
+  // harmonics of the 0.7-rev hold were 14.6 bins apart in a 16384 window; at
+  // 700-4600 they are 10.6 apart, so a floor window reaching 24 bins out was
+  // taking its median across two whole neighbouring harmonics and their
+  // skirts. The floor came out far too high, the weak odd harmonics were
+  // clipped away by the subtraction, and this tool reported that the burble
+  // had barely moved — 0.353 to 0.369 — for a change that the harmonic stack's
+  // own arithmetic, which has no window and no floor to get wrong, puts at
+  // 0.354 to 0.589. The rule that replaced it is a proportion, so the same
+  // sixteen harmonics are counted whatever the engine is doing, and `used` is
+  // returned and printed so that any remaining asymmetry is visible rather
+  // than assumed away. 32768 rather than 16384 for a related reason: 1.35Hz
+  // bins keep even a 700rpm idle's harmonics resolved.
+  const above = (mag, bin, off0, off1) => {
     const near = [];
-    for (let d = 8; d <= 24; d++) { near.push(mag[bin - d] || 0); near.push(mag[bin + d] || 0); }
+    for (let d = off0; d <= off1; d++) { near.push(mag[bin - d] || 0); near.push(mag[bin + d] || 0); }
     near.sort((a, b) => a - b);
     const floor = near[near.length >> 1];
     return Math.max(0, Math.max(mag[bin - 1], mag[bin], mag[bin + 1]) - floor);
   };
+  /**
+   * AND THE SPECTRUM IS AVERAGED OVER NINE WINDOWS, WHICH IS THE OTHER HALF OF
+   * THE SAME FAULT. The engine is two oscillators detuned 0.55% apart, so every
+   * harmonic is a pair of lines that beat — 3.2 seconds per beat at k=1 — and
+   * a single window catches whatever phase it lands on. Six windows 200ms apart
+   * on ONE render of ONE engine gave 0.339, 0.393, 0.495, 0.409, 0.440, 0.446.
+   * Averaging POWER over nine windows spanning three seconds gives 0.359 to
+   * 0.369 across the same six starting points, because the mean power of two
+   * beating lines does not depend on when you looked. The hold below is 4.6
+   * seconds so that there is three seconds of settled engine to average over.
+   */
+  const welch = (x, at, N, nw, span) => {
+    const P = new Float64Array(N / 2);
+    for (let w = 0; w < nw; w++) {
+      const m = spectrum(x, at + Math.round(w * span / (nw - 1)), N);
+      for (let i = 0; i < N / 2; i++) P[i] += m[i] * m[i];
+    }
+    const mag = new Float64Array(N / 2);
+    for (let i = 0; i < N / 2; i++) mag[i] = Math.sqrt(P[i] / nw);
+    return mag;
+  };
   const oddEven = (x, spec) => {
-    const mag = spectrum(x, Math.round(0.8 * SR), 16384);
-    const df = SR / 16384;
+    const N = 32768;
+    const mag = welch(x, Math.round(0.9 * SR), N, 9, Math.round(3.0 * SR));
+    const df = SR / N;
     const f = (spec.idle + 0.7 * (spec.red - spec.idle)) / 120;
-    let odd = 0, even = 0;
+    const sp = f / df;                       // bins from one harmonic to the next
+    const off0 = Math.max(3, Math.round(sp * 0.30));
+    const off1 = Math.max(off0 + 3, Math.round(sp * 0.70));
+    let odd = 0, even = 0, used = 0;
     for (let k = 1; k <= spec.cylinders * 2; k++) {
       const bin = Math.round(k * f / df);
-      if (bin < 25 || bin >= mag.length - 25) continue;
-      const v = above(mag, bin);
+      if (bin - off1 < 1 || bin + off1 >= mag.length) continue;
+      const v = above(mag, bin, off0, off1);
       if (k & 1) odd += v; else even += v;
+      used++;
     }
-    return { odd, even, ratio: odd / (even || 1e-9), fire: f * spec.cylinders };
+    return { odd, even, ratio: odd / (even || 1e-9), fire: f * spec.cylinders,
+             used, spacing: sp };
   };
   // ---- F. the countdown, the verge and the brake ---------------------------
   //
@@ -667,9 +710,10 @@ const M = await page.evaluate(async (trace) => {
 
   const eng = {};
   for (const name of ['v8', 'v12']) {
-    const r = await render(holdTrace(1.6, 0.7, 2), { engine: name });
+    const r = await render(holdTrace(4.6, 0.7, 2), { engine: name });
     eng[name] = oddEven(r.x, A.ENGINES[name]);
-    eng[name].measuredPeak = peakHz(spectrum(r.x, Math.round(0.8 * SR), 16384), 40, 2000);
+    eng[name].measuredPeak = peakHz(welch(r.x, Math.round(0.9 * SR), 32768, 9,
+                                          Math.round(3.0 * SR)), 40, 2000);
     eng[name].rms = stats(r.x).rms;
   }
   R.engines = eng;
@@ -883,7 +927,8 @@ console.log('\n--- the harmonic stack is a parameter ---------------------------
 for (const [name, e] of Object.entries(M.engines)) {
   console.log(`  ${name.padEnd(4)} firing harmonic wanted ${e.fire.toFixed(0)}Hz, ` +
               `loudest peak ${e.measuredPeak.toFixed(0)}Hz, ` +
-              `half-order / integer-order energy ${e.ratio.toFixed(3)}`);
+              `half-order / integer-order energy ${e.ratio.toFixed(3)} ` +
+              `over ${e.used} harmonics ${e.spacing.toFixed(1)} bins apart`);
 }
 ok(M.engines.v8.ratio > M.engines.v12.ratio * 3,
    'the V8 burbles (half-orders) where the V12 does not',
@@ -891,6 +936,19 @@ ok(M.engines.v8.ratio > M.engines.v12.ratio * 3,
 ok(M.engines.v12.fire > M.engines.v8.fire * 1.4,
    'and the V12 fires far higher at the same point in the gear',
    `${M.engines.v12.fire.toFixed(0)}Hz vs ${M.engines.v8.fire.toFixed(0)}Hz`);
+// THE CAR'S OWN ENGINE, IN ABSOLUTE HERTZ, because every other check on this
+// page is a ratio or a comparison and every one of them would stay green if
+// somebody put the V8 back up to a 6,400rpm limiter tomorrow. Anthony drove
+// that version and said it was a tuned V6. The full before-and-after is
+// tools/enginenote.mjs, which also renders it to tools/out/*.wav; these two
+// lines are the ratchet that stops it drifting back.
+ok(M.engines.v8.fire > 205 && M.engines.v8.fire < 240,
+   'THE V8 IS A BIG V8: its firing harmonic at seven-tenths revs is where a lazy ' +
+   'cross-plane engine lives, not where a tuned V6 screams',
+   `${M.engines.v8.fire.toFixed(0)}Hz, and it was 314Hz when he drove it`);
+ok(M.engines.v8.ratio > 0.44,
+   'and it is raunchy: nearly half its integer-order energy again in half-orders',
+   `${M.engines.v8.ratio.toFixed(3)}, and the engine he drove measures 0.322 here`);
 
 // ---------------------------------------------------------------------------
 // WHAT IT COSTS US, on the thread that has 6ms spare. Web Audio's own DSP runs

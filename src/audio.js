@@ -53,10 +53,21 @@
  *                    A low tilt is a hard, bright, open-pipe engine; a high
  *                    one is a muffled saloon.
  *   the UNEVENNESS   half-orders (odd k) scaled by `uneven`. 0 is a perfectly
- *                    even-fire engine, 0.55 is a cross-plane V8's lope. Around
+ *                    even-fire engine, 0.95 is a cross-plane V8's lope. Around
  *                    the firing harmonic they are sidebands at kf±1, which is
- *                    amplitude modulation at the cycle rate — 6.5Hz at idle,
- *                    53Hz at the limiter. That modulation IS the burble.
+ *                    amplitude modulation at the cycle rate — 5.8Hz at idle,
+ *                    38Hz at the limiter. That modulation IS the burble.
+ *   the BEAT         `beat`, and it is the other half of what a cross-plane V8
+ *                    is. Its two banks each fire FOUR times per cycle but not
+ *                    evenly, and down one collector that leaves a strong pulse
+ *                    train at half the firing order — crank order 2 for a V8,
+ *                    k = kf/2 — with its own odd multiples k = 3kf/2, 5kf/2
+ *                    falling as 1/n^1.5 like the firing stack does. It is the
+ *                    octave-below thump under the note: the difference between
+ *                    a V8 and a four-cylinder revving twice as hard. Multiples
+ *                    of kf are excluded because those bins already carry the
+ *                    firing peak. Default 0, so every other engine is
+ *                    unchanged by the term existing.
  *
  * THE SPREAD USED TO FALL AS 1/order FROM ORDER 0.5 UPWARD, AND THAT WAS
  * WRONG, measurably. It made k=1 and k=2 — 30 and 60Hz, below anything a phone
@@ -70,6 +81,8 @@
 function stack(spec) {
   const kf = spec.cylinders;
   const tilt = spec.tilt, uneven = spec.uneven, peak = spec.peak || 1;
+  const beat = spec.beat || 0;
+  const hb = kf / 2;                     // the bank order: half the firing one
   const kmax = Math.min(72, kf * 6);
   const a = new Float32Array(kmax + 1);
   for (let k = 1; k <= kmax; k++) {
@@ -77,6 +90,9 @@ function stack(spec) {
     let v = spec.base * (r <= 1 ? Math.pow(r, 1.1) : Math.pow(r, -tilt));
     if (k & 1) v *= uneven;
     if (k % kf === 0) v += peak / Math.pow(r, 1.5);
+    else if (beat && hb === Math.round(hb) && k % hb === 0) {
+      v += beat * peak / Math.pow(k / hb, 1.5);
+    }
     a[k] = v;
   }
   return a;
@@ -100,9 +116,25 @@ function wave(ctx, amps) {
  *              a bit above eight.
  *   uneven     half-order content. The burble.
  *   tilt/base  the roll-off — how much is going on above the firing harmonic.
- *   idle/red   the rev range the 0..1 rev signal is stretched across. A muscle
- *              V8 that revs to 6,400 and a V12 that revs to 8,600 sound
- *              different at the same *point in the gear*, which is right.
+ *   idle/red   the rev range the 0..1 rev signal is stretched across, and it is
+ *              THE PITCH CONTROL. A muscle V8 that revs to 4,600 and a V12 that
+ *              revs to 8,600 sound different at the same *point in the gear*,
+ *              which is right — the V8's firing harmonic at seven-tenths revs
+ *              is 229Hz where the V12's is 632Hz, an octave and a half apart on
+ *              the same corner of the same lap.
+ *
+ *              THE V8 USED TO REV TO 6,400 AND IT WAS THE WRONG ENGINE. Anthony
+ *              drove it: "would be even better if slightly lower in pitch. This
+ *              pitch would be better for a tuned V6, V8's tend to be a bit
+ *              lower and raunchy sounding." He is right, and the fault was
+ *              physical rather than cosmetic — a 6,400rpm limiter IS a tuned
+ *              V6's limiter, and no amount of harmonic shaping makes an engine
+ *              that revs like one sound like something else. Fixed where it was
+ *              broken: 780-6,400 became 700-4,600, which drops the firing
+ *              frequency 28% — a musical fourth — everywhere at once and leaves
+ *              the tacho, the gears and the sound still reading off the same
+ *              rev fraction. Detuning the oscillators instead would have moved
+ *              the sound and left the needle behind.
  *   body       three peaking filters, the exhaust's own resonances. A cheap
  *              stand-in for a pipe, and it is most of the "big" in big engine.
  *              KEEP THEM MODEST. The first V8 had +7dB at 105Hz and -5dB at
@@ -118,10 +150,22 @@ function wave(ctx, amps) {
  * drive low because a V12 is smooth rather than angry. Nothing else changes.
  */
 const ENGINES = {
-  // The one in the car. A big lazy cross-plane muscle V8.
-  v8: { name: 'V8 cross-plane', cylinders: 8, uneven: 0.55, tilt: 1.30, base: 0.62,
-        peak: 1.0, idle: 780, red: 6400, drive: 0.62,
-        body: [[120, 1.0, 4], [340, 0.7, -2], [1800, 0.8, -4]] },
+  // The one in the car. A big lazy cross-plane muscle V8 — LAZY IS A NUMBER
+  // HERE, not an adjective: it is the 4,600 limiter. Everything else on this
+  // line is the raunch. uneven 0.95 and beat 0.28 put half the energy of the
+  // firing peak below and around it instead of on top of it, tilt 1.22 keeps
+  // the upper harmonics that stop a low engine becoming a drone, and drive 0.74
+  // is the waveshaper leaning on all of it. Measured, both of them, by
+  // tools/enginenote.mjs: firing 229Hz at seven-tenths revs where it was 314,
+  // half-order/integer-order energy 0.46 in the rendered sound where it was
+  // 0.32. UNEVEN IS 0.95 AND NOT THE 0.80 THAT THE STACK ARITHMETIC SAYS WOULD
+  // DO, because the waveshaper eats burble: measured through the real graph,
+  // 0.80 in the spec comes out as 0.36 in the sound and 0.95 comes out as 0.46.
+  // The drive redistributes energy toward the strong firing order, so the
+  // half-orders have to be written in louder than they are wanted.
+  v8: { name: 'V8 cross-plane', cylinders: 8, uneven: 0.95, tilt: 1.22, base: 0.68,
+        peak: 1.0, beat: 0.28, idle: 700, red: 4600, drive: 0.74,
+        body: [[100, 1.0, 4], [330, 0.7, -2], [1700, 0.8, -3]] },
   // Flat-plane: same eight cylinders, even-fire, so the burble goes and a
   // hard European rasp arrives in its place. Same block, different crank.
   v8flat: { name: 'V8 flat-plane', cylinders: 8, uneven: 0.10, tilt: 1.05, base: 0.55,
@@ -269,7 +313,7 @@ export function createAudio(opts) {
   const api = {
     ctx: null, muted: false, nodes: 0, writes: 0, engine: cfg.engine,
     ENGINES,
-    resume, attach, update, setMuted, setEngine, spectrumOf,
+    resume, attach, update, setMuted, setEngine, spectrumOf, crash,
   };
 
   // Every AudioParam this thing writes per frame, with the last value written,
@@ -540,7 +584,7 @@ export function createAudio(opts) {
     const f = rpm / 120;                       // cycle fundamental, k=1
     // THE TWO OSCILLATORS STRADDLE THE TRUE FREQUENCY, 0.55% either side.
     // Two banks that are not quite in agreement is what a real engine is, and
-    // the beating it produces at the firing harmonic (0.7Hz at idle, 5Hz at
+    // the beating it produces at the firing harmonic (0.5Hz at idle, 3.4Hz at
     // the limiter) is the difference between an engine and an organ. They are
     // spread SYMMETRICALLY because the load crossfade moves the balance
     // between them: detuning one of the pair upward instead put the whole
@@ -563,8 +607,12 @@ export function createAudio(opts) {
     ramp('eg', g.engGain.gain,
          0.34 * (0.34 + 0.66 * load) * Math.pow(0.30 + 0.70 * rev, 1.6),
          TC.gain, t, 0.003);
-    // Combustion roughness sits an octave above the firing harmonic.
-    ramp('cf', g.combBP.frequency, clamp(f * spec.cylinders * 2, 120, 5000), TC.filt, t, 8);
+    // Combustion roughness sits an octave above the firing harmonic. The floor
+    // was 120Hz and is now 90: it is there to stop the band walking into the
+    // mud at very low revs, not to hold it above the engine, and with the V8
+    // idling at 700 the old floor clamped the band 30% above where the engine
+    // actually was — the chuff came unstuck from the note at idle.
+    ramp('cf', g.combBP.frequency, clamp(f * spec.cylinders * 2, 90, 5000), TC.filt, t, 8);
     ramp('cg', g.combG.gain, 0.10 * load * (0.3 + 0.7 * rev), TC.gain, t, 0.003);
 
     // --- wind and tyres -----------------------------------------------------
@@ -692,6 +740,85 @@ export function createAudio(opts) {
   }
 
   /** The finish: three notes up, quickly, over the car still running. */
+  /**
+   * GOING INTO THE HOLE. Called by main.js the frame the bridge is missed.
+   *
+   * Three layers, and the ORDER of them is the sound: a crack, then a tearing
+   * scrape, then a low boom that outlasts both. That is what an impact is —
+   * the first contact is broadband and instantaneous, the sliding is filtered
+   * noise, and what your chest hears arrives last and lowest.
+   *
+   * `strength` is the fraction of top speed it happened at, so walking into
+   * the gap is a clatter and arriving at 250 is not. Clamped, because a
+   * boosted car can be over 1 and a crash that overdrives the limiter would
+   * duck the whole mix for a second.
+   *
+   * IT IS NOT AN EXPLOSION. There is no fire in this game and there is not
+   * going to be; a car falling into a hole makes the noise of a large metal
+   * object hitting concrete, and the difference matters because the player has
+   * to understand instantly what they did wrong.
+   */
+  function crash(strength) {
+    if (!g) return;
+    const ctx = g.ctx;
+    const t = ctx.currentTime;
+    const s = Math.max(0.25, Math.min(1, strength || 0.5));
+
+    // Duck the engine hard and hold it there — the throttle is dead in a wreck
+    // and main.js has already stopped the car, so the note must not hang on.
+    const d = g.duck.gain;
+    d.cancelScheduledValues(t);
+    d.setValueAtTime(d.value, t);
+    d.linearRampToValueAtTime(0.06, t + 0.03);
+    d.linearRampToValueAtTime(1, t + 2.2);
+
+    // 1. THE CRACK. Wide open, 60ms, gone.
+    const hit = ctx.createBufferSource();
+    hit.buffer = g.noise; hit.loop = true;
+    const hf = ctx.createBiquadFilter();
+    hf.type = 'bandpass'; hf.Q.value = 0.6;
+    hf.frequency.setValueAtTime(2600, t);
+    hf.frequency.exponentialRampToValueAtTime(700, t + 0.09);
+    const hg = ctx.createGain();
+    hg.gain.setValueAtTime(0.0001, t);
+    hg.gain.exponentialRampToValueAtTime(3.4 * s, t + 0.006);
+    hg.gain.exponentialRampToValueAtTime(0.0008, t + 0.10);
+    hg.gain.setValueAtTime(0, t + 0.11);
+    hit.connect(hf).connect(hg).connect(g.master);
+    hit.start(t); hit.stop(t + 0.12);
+
+    // 2. THE SCRAPE. Metal on concrete, falling away over three quarters of a
+    // second — this is the layer that says "still moving" rather than "stopped".
+    const scr = ctx.createBufferSource();
+    scr.buffer = g.noise; scr.loop = true;
+    const sf = ctx.createBiquadFilter();
+    sf.type = 'bandpass'; sf.Q.value = 2.2;
+    sf.frequency.setValueAtTime(1500, t + 0.02);
+    sf.frequency.exponentialRampToValueAtTime(320, t + 0.75);
+    const sg = ctx.createGain();
+    sg.gain.setValueAtTime(0.0001, t + 0.02);
+    sg.gain.exponentialRampToValueAtTime(1.5 * s, t + 0.07);
+    sg.gain.exponentialRampToValueAtTime(0.35 * s, t + 0.40);
+    sg.gain.exponentialRampToValueAtTime(0.0008, t + 0.80);
+    sg.gain.setValueAtTime(0, t + 0.82);
+    scr.connect(sf).connect(sg).connect(g.master);
+    scr.start(t + 0.02); scr.stop(t + 0.84);
+
+    // 3. THE BOOM. A tuned thump an octave and a half under the engine's idle
+    // firing note, swept down so it reads as mass rather than as a bass note.
+    const boom = ctx.createOscillator();
+    boom.type = 'sine';
+    boom.frequency.setValueAtTime(105, t + 0.01);
+    boom.frequency.exponentialRampToValueAtTime(34, t + 0.55);
+    const bg2 = ctx.createGain();
+    bg2.gain.setValueAtTime(0.0001, t + 0.01);
+    bg2.gain.exponentialRampToValueAtTime(2.2 * s, t + 0.03);
+    bg2.gain.exponentialRampToValueAtTime(0.0008, t + 1.00);
+    bg2.gain.setValueAtTime(0, t + 1.02);
+    boom.connect(bg2).connect(g.master);
+    boom.start(t + 0.01); boom.stop(t + 1.04);
+  }
+
   function finish(t) {
     const ctx = g.ctx;
     const notes = [523.25, 659.25, 987.77];

@@ -423,6 +423,19 @@ const POD_HW = 0.130;           // half-width of the binnacle, frame widths
 const MPH = 0.9633;
 const DIAL_FULL = 320;
 
+/**
+ * THE TACHO'S FULL SCALE, in rpm, set once by buildCockpit from the engine.
+ *
+ * Module-level and mutable, which is not how anything else here works and is
+ * deliberate: the dial face is DRAWN ONCE into the atlas at build time, by a
+ * chain of drawing functions that are called for their side effects on a canvas
+ * and take no state object. Threading one number down through drawDash and
+ * drawCockpitArt to reach drawDials would touch four signatures to deliver a
+ * constant that never changes after boot. Written exactly once, before any
+ * drawing happens; read twice, by the two drawDials calls.
+ */
+let TACHO_FULL = 8000;
+
 // ------------------------------------------------- the gear, in the tacho
 //
 // WHERE A GEAR NUMBER GOES, and it is not the radio panel. That panel's LCD is
@@ -1082,10 +1095,21 @@ function dial(x, cx, cy, r, o) {
  * themselves — same centres, same radii, so the redraw covers the old one
  * exactly. Speedo on the right, tacho on the left, the same way round as a car.
  */
-function drawDials(x, W, H, mirrored) {
+function drawDials(x, W, H, mirrored, tachoFull) {
   const at = (fx) => (mirrored ? 1 - fx : fx) * W;
+  // THE TACHO'S SCALE IS THE ENGINE'S, NOT A LITERAL. This read 0-8 thousand
+  // for as long as the V8's limiter was 6,400 — already loose by a quarter, and
+  // nobody looked. Then the limiter went to 4,600 to fix a note Anthony
+  // correctly heard as a tuned V6 rather than a V8, and the face was suddenly
+  // claiming eight thousand revs on an engine that stops at four and a half.
+  // main.js now derives this from the engine's own redline, rounded up to the
+  // next thousand, so the garage cannot sell an engine that makes the dial lie.
+  // Eight majors on a five-thousand face would be 625rpm apart and unreadable,
+  // so one major per thousand with a label every other one: 0, 2, 4 on a
+  // big-block face, exactly what a car with this little rev range wears.
+  const majors = Math.max(4, Math.round((tachoFull || 8000) / 1000));
   dial(x, at(WHEEL_X - DIAL_DX), DIAL_Y * H, DIAL_R * H,
-       { majors: 8, minors: 2, step: 1, labelEvery: 2, red: 0.80, label: 'RPM',
+       { majors, minors: 2, step: 1, labelEvery: 2, red: 0.80, label: 'RPM',
          labelUp: true });
   dial(x, at(WHEEL_X + DIAL_DX), DIAL_Y * H, DIAL_R * H,
        { majors: 8, minors: 2, step: DIAL_FULL / 8, labelEvery: 2, red: 0.88,
@@ -1350,7 +1374,7 @@ function drawDash(x, W, H, o) {
     x.strokeStyle = C.trimLit; x.lineWidth = 4; x.stroke();
   }
 
-  drawDials(x, W, H, false);
+  drawDials(x, W, H, false, TACHO_FULL);
 
   // ---- windscreen header and A-pillars ------------------------------------
   //
@@ -2186,6 +2210,9 @@ function measureInk(g, x0, y0, w, h) {
  */
 export function buildCockpit(o = {}) {
   const pal = o.palette || {};
+  // BEFORE ANY DRAWING. Everything below this line that puts ink on the atlas
+  // may read it, and nothing after boot may write it.
+  TACHO_FULL = o.tachoFull || 8000;
   const DX = o.driverX ?? 0;
   // LEFT-HAND DRIVE FOR FREE. The whole picture is laid out about WHEEL_X,
   // which is right of centre; a negative driverX flips the finished canvas
@@ -2282,7 +2309,7 @@ export function buildCockpit(o = {}) {
     g.scale(-1, 1);
     g.drawImage(tmp, 0, 0);
     g.restore();
-    inRegion(ART_X, ART_Y, ART_W, ART_H, (x, w, h) => drawDials(x, w, h, true));
+    inRegion(ART_X, ART_Y, ART_W, ART_H, (x, w, h) => drawDials(x, w, h, true, TACHO_FULL));
     // and the radio's glass, for the same reason the dials are redrawn: a
     // mirrored `0:00.0` puts the point where the colon belongs.
     inRegion(ART_X, ART_Y, ART_W, ART_H, (x, w, h) => drawLcdStatic(x, w, h, true));

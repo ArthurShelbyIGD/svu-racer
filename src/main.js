@@ -33,6 +33,9 @@ import {
 import { inkGroup, buildOutline, inkMaterial, pencilTexture, INK } from './art/toon.js';
 import { buildBody } from './car/body.js';
 import { buildFurniture } from './world/furniture.js';
+import { buildBarrier } from './world/barrier.js';
+import { buildTunnel } from './world/tunnel.js';
+import { BRIDGE, shapeBridge, inGap, lipDist, gapWidth } from './world/bridge.js';
 import { buildGantry } from './world/gantry.js';
 // PEDAL_TOP and PEDAL_W come from the cockpit because the cockpit DRAWS the
 // pedal and the boost bottle, and the picture and the hit test have to be the
@@ -72,6 +75,18 @@ const BEHIND = 5;
 const GROUND_INK = 0.10;
 /** How far off the centreline the car may stray. See the note at its use. */
 const STRAY_MAX = 11.1;
+/**
+ * GRAVITY, in world units per second squared, and it is 85 rather than 9.8 on
+ * purpose. A world unit here is about two thirds of a metre — the road is 18
+ * across — but the real reason is the arc it draws: at 85 the bridge jump lasts
+ * about a second at racing speed, and Earth gravity at these speeds would keep
+ * the car airborne for the better part of a hundred metres of track. Tuned to
+ * the jump, then checked against the rest of the lap in tools/bridge.mjs.
+ */
+const GRAVITY = 85;
+/** How far you may stray UNDER THE TUNNEL, whose walls stand at 12.0 rather
+ *  than the open road's 13.7. Half a unit of car body inboard of the wall. */
+const TUNNEL_STRAY = 10.4;
 /** How far ahead ground ink is drawn. Beyond this a line is under a pixel wide
  *  and crawls; the strips are still emitted, collapsed to zero width. */
 const INK_SEGS = 90;
@@ -709,8 +724,32 @@ class Road {
       // flat colour has nothing to move past you. Keyed off the wrapped segment
       // index so it does not flip phase when the walk starts before segment 0.
       const alt = (a >> 1) & 1;
-      const road = alt ? PAL.road : PAL.roadAlt;
+      let road = alt ? PAL.road : PAL.roadAlt;
       const verge = alt ? PAL.gutterA : PAL.gutterB;
+
+      // THE COLLAPSED SPAN. Only the tarmac and the centre line drop into the
+      // hole; the gutters stay up at deck height, because they are what is
+      // LEFT of the bridge — the side beams the middle fell out of. The crash
+      // barrier runs across on top of them for the same reason, and that is
+      // the picture: a road surface that has gone, between edges that have not.
+      //
+      // A quad spanning the lip is dropped at one end only, so the tarmac tears
+      // away downwards at the break instead of ending in a clean vertical edge.
+      const gapHere = track.gap ? track.gap[a] === 1 : false;
+      const gapNext = track.gap ? track.gap[b] === 1 : false;
+      const drop1 = gapHere ? BRIDGE.chasm : 0;
+      const drop2 = gapNext ? BRIDGE.chasm : 0;
+      if (gapHere || gapNext) road = CHASM;
+      // THE HAZARD BAND, on the tarmac immediately before the break. A
+      // humpback bridge hides its own far side — that is what makes it a
+      // humpback bridge — so from the approach there is nothing to see but a
+      // brow, and the first version of this gave the player no warning at all
+      // before a fail state. Alternating on the segment so it reads as
+      // chevrons rather than as a solid patch of colour, and it costs nothing:
+      // these quads are drawn every frame either way.
+      else if (track.gap && track.gap[(a + BRIDGE.warn) % track.n] === 1) {
+        road = (a & 1) ? PAL.ink : HAZARD;
+      }
 
       // Fake distance shading: darken with depth. This is what a fog colour
       // does for free, but doing it in vertex colour too keeps the near road
@@ -719,8 +758,8 @@ class Road {
       const shade = 1 - 0.35 * (Math.max(0, i) / SEG_COUNT);
 
       this._quad(q++,
-        x1 - ROAD_W, y1, z1, x2 - ROAD_W, y2, z2,
-        x2 + ROAD_W, y2, z2, x1 + ROAD_W, y1, z1, road, shade);
+        x1 - ROAD_W, y1 - drop1, z1, x2 - ROAD_W, y2 - drop2, z2,
+        x2 + ROAD_W, y2 - drop2, z2, x1 + ROAD_W, y1 - drop1, z1, road, shade);
 
       // THE GUTTER. Two quads, one each side, between the tarmac and the kerb.
       //
@@ -749,10 +788,10 @@ class Road {
       // colour on the gaps. Skipping the geometry instead would mean a variable
       // number of quads per frame, and the whole point of this mesh is that its
       // size never changes.
-      const onDash = (a % 4) < 2;
+      const onDash = (a % 4) < 2 && !gapHere && !gapNext;
       const LANE_W = 0.30;
       this._quad(q++,
-        x1 - LANE_W, y1 + 0.012, z1, x2 - LANE_W, y2 + 0.012, z2,
+        x1 - LANE_W, y1 + 0.012 - drop1, z1, x2 - LANE_W, y2 + 0.012 - drop2, z2,
         x2 + LANE_W, y2 + 0.012, z2, x1 + LANE_W, y1 + 0.012, z1,
         onDash ? PAL.lane : road, shade);
 
@@ -890,6 +929,18 @@ class Posts {
  * in more haze.
  */
 const CITY_INK = 0x0d1119;
+
+/**
+ * WHAT YOU SEE THROUGH THE BROKEN BRIDGE. Darker than the city ink and a touch
+ * warmer, so it reads as a hole with something a long way down in it rather
+ * than as a patch of night sky let into the road — the two are next to each
+ * other on screen and must not be the same colour.
+ */
+const CHASM = 0x07080b;
+
+/** The warning stripe at the broken bridge. Roadworks yellow, which is the one
+ *  colour on this palette that means "stop looking at the scenery". */
+const HAZARD = 0xe0a92b;
 
 /**
  * A PEN NIB DOES NOT KNOW HOW FAR AWAY THE BUILDING IS.
@@ -1981,6 +2032,12 @@ scene.fog = new FogExp2(PAL.haze, FOG_DENSITY);
 const camera = new PerspectiveCamera(72, 1, 0.5, FOG_FAR + SEG_LEN * 8);
 
 const track = buildTrack(4000, 0x9e3779b9);
+// THE BROKEN BRIDGE, added into the elevation before anything reads it. It has
+// no mesh of its own: the road, the barrier, the pavement and the camera all
+// draw from track.hill and therefore all climb over the arch without a line of
+// code about it. See src/world/bridge.js for why the missing span is a separate
+// flag rather than a hole in the hill.
+shapeBridge(track, SEG_LEN);
 const handling = deriveHandling(track);
 CENTRIFUGAL = handling.cent;
 
@@ -2007,7 +2064,15 @@ handling.margins = SPEED_STEPS.map((s) => ({
 }
 
 const road = new Road(scene);
-const posts = new Posts(scene, 120);
+// STEEL ARMCO, not the teal posts. Same variable name, same one draw call, and
+// the same job the posts were there for — hard edges whipping past at the side
+// of vision, which is most of what makes a racer feel fast. Measured against
+// the posts it replaces in tools/armco.mjs: peripheral pixels changed per frame
+// went 0.66 to 1.18, and the outer fifth of the screen went from 0.3% covered
+// to 5.3%. `PROF.posts` still times the right thing because the name did not
+// change. See the head of barrier.js for what is and is not proven about it.
+const posts = buildBarrier({ scene, palette: PAL, ink: INK, roadW: ROAD_W,
+                             segLen: SEG_LEN, segCount: SEG_COUNT, behind: BEHIND });
 // 120,000. The dial has now been raised twice for the same reason: it kept
 // running out before the phone did. 4,000 had no effect; 20,000 had no effect
 // either, at 245,000 triangles. Anthony: "it would be an idea to up the amount
@@ -2143,6 +2208,7 @@ function startRace() {
   // would make the restart depend on how the previous attempt ended, and a
   // player who crashed out of a bad lap would be punished twice for it.
   st.boostLeft = 1; boostArmed = true;
+  st.air = 0; st.vy = 0; st.y = 0;
   pedal.brake = false; pedal.boost = false;
 }
 
@@ -2152,8 +2218,38 @@ function startRace() {
  * would still let the engine pull against it and would make the launch depend
  * on how the two happened to balance.
  */
+/**
+ * INTO THE HOLE. The one way to fail a lap outright, and Anthony chose it over
+ * the forgiving options when he was offered them.
+ *
+ * It is deliberately not instant. The car keeps falling for CRASH_HOLD seconds
+ * with the throttle dead — you watch yourself go in, which is the point of a
+ * fail state — and then the lap restarts from the grid. There is no partial
+ * credit and no scrabbling out: the bridge is the only thing on this track that
+ * can end a run, so it should end it.
+ *
+ * `race.fresh` is cleared because a crashed lap has set no record, and leaving
+ * a stale flag on it would blink BEST at the player on the way to the restart.
+ */
+function crash() {
+  if (race.state === 'crash') return;         // once per hole, not once per frame
+  race.state = 'crash'; race.t = 0; race.fresh = false;
+  st.air = 1;                                  // still falling, and still drawn falling
+  audio.crash(st.speed / Math.max(1, tune.maxSpeed));
+}
+
+/** How long the wreck is held before the lap restarts. Long enough to see what
+ *  happened and understand it was the gap; short enough to want another go. */
+const CRASH_HOLD = 2.4;
+
 function stepRace(dt) {
   race.t += dt;
+  // THE WRECK. The car goes on falling — st.y is still being integrated below,
+  // and nothing here stops it — until the hold expires.
+  if (race.state === 'crash') {
+    if (race.t >= CRASH_HOLD) startRace();
+    return;
+  }
   if (race.state === 'countdown') {
     if (race.t >= COUNTDOWN) { race.state = 'racing'; race.t = 0; }
     return;
@@ -2193,6 +2289,13 @@ const gantry = buildGantry({
   scene, roadW: ROAD_W, segLen: SEG_LEN, segCount: SEG_COUNT, behind: BEHIND,
   from: RACE_FROM, len: RACE_LEN,
 });
+// THE TUNNEL, at segments 1520-1600 — a flat, straight stretch the module found
+// by reading track.hill and track.curve rather than by anyone picking a number.
+// It costs one draw call while it is on screen and nothing when it is not, and
+// the finish gantry — the frame that sets the worst-case budget — is 500
+// segments away, so the two can never be drawn together.
+const tunnel = buildTunnel({ scene, palette: PAL, ink: INK, roadW: ROAD_W,
+                             segLen: SEG_LEN, segCount: SEG_COUNT, behind: BEHIND });
 // One texture for the whole game. Generated at startup from a few hundred
 // bytes of canvas drawing, never downloaded.
 const PENCIL = pencilTexture(128);
@@ -2211,7 +2314,20 @@ const PENCIL = pencilTexture(128);
 // moment the real thing draws a triangle the old one has to go in the same
 // commit.
 const bodyKit = buildBody({ pencil: PENCIL, palette: PAL, ink: INK });
-const cockpit = buildCockpit({ pencil: PENCIL, palette: PAL, ink: INK, driverX: DRIVER_X });
+// THE TACHO'S FULL SCALE COMES FROM THE ENGINE, and it has to, because the two
+// have already drifted apart once. The dial face was drawn 0-8 thousand as a
+// literal back when the V8's limiter was 6,400 — loose, but only by a quarter.
+// Anthony then said the engine sounded like a tuned V6 rather than a V8, which
+// it did, because 6,400 IS a tuned V6's limiter; dropping it to 4,600 fixed the
+// sound and left the needle claiming eight thousand revs on an engine that
+// stops at four and a half. An instrument that reports the machine beats one
+// that performs, and that cuts both ways: the face is now graduated from the
+// engine's own redline, rounded up to the next thousand, so buying a different
+// engine in the garage re-graduates the tacho instead of quietly making it lie.
+const REDLINE_RPM = (audio.ENGINES[audio.engine] || audio.ENGINES.v8).red;
+const TACHO_FULL = Math.ceil(REDLINE_RPM / 1000) * 1000;
+const cockpit = buildCockpit({ pencil: PENCIL, palette: PAL, ink: INK, driverX: DRIVER_X,
+                               tachoFull: TACHO_FULL });
 
 /** Filled in and handed to the cockpit each frame; never reallocated. */
 const COCKPIT_STATE = { speed: 0, maxSpeed: 0, steer: 0, boosting: false, braking: false,
@@ -2250,6 +2366,14 @@ const st = {
   // you the refill as well as the speed. The cockpit's right-hand dial and the
   // toggle switch under the lamp both read this.
   boostLeft: 1,
+  // OFF THE GROUND. `air` is 0 or 1 rather than a boolean so it can be read
+  // straight into a readout; `y` is the car's ABSOLUTE height, which is the
+  // road's height whenever it is not flying, and `vy` its vertical speed.
+  // Absolute rather than "height above the road", because the road's height
+  // changes underneath you while you are in the air and a relative figure would
+  // have to be corrected for that every frame — which is one more place to get
+  // a sign wrong.
+  air: 0, y: 0, vy: 0,
 };
 
 // A full bottle is BOOST_DRAIN seconds of boost; an empty one takes
@@ -2799,7 +2923,10 @@ function frame(now) {
 
   // --- the race, before anything can move ---
   stepRace(dt);
-  const held = race.state === 'countdown' || race.state === 'grid';
+  // A CRASH HOLDS THE CAR TOO. The throttle is dead in the wreck for the same
+  // reason it is dead on the line: whatever the player's thumb is doing must
+  // not affect what happens next.
+  const held = race.state === 'countdown' || race.state === 'grid' || race.state === 'crash';
 
   // --- drive ---
   const kL = keys.ArrowLeft || keys.KeyA ? -1 : 0;
@@ -2905,12 +3032,123 @@ function frame(now) {
   // ramp" — which is exactly right: the hill was being drawn, then repeatedly
   // yanked back to level. The Z axis was already interpolated by `frac`. The Y
   // axis was not, and that asymmetry was the bug.
-  const baseY = track.hill[base]
+  const roadY = track.hill[base]
     + (track.hill[(base + 1) % track.n] - track.hill[base]) * frac;
+
+  // The slope of the segment under the car. Read here, above the jump, because
+  // the jump's launch angle IS this number and it must not be the smoothed one.
+  const slopeNow = (track.hill[(base + 1) % track.n] - track.hill[base]) / SEG_LEN;
+
+  // ---- THE CAR LEAVES THE GROUND ------------------------------------------
+  //
+  // THE RULE IS GENERAL, NOT A SPECIAL CASE FOR THE BRIDGE. A car follows the
+  // road only while the road stays under it. So ask exactly that, every frame:
+  // take the vertical speed the road is currently giving the car, let it fall
+  // for one frame under gravity, and see whether that puts it above the road at
+  // the place it will be. If it does, there is nothing holding the tyres on and
+  // it is flying. The bridge is simply the only crest on this track steep
+  // enough for the answer to come back yes at a speed you can reach.
+  //
+  // IT IS WRITTEN AS THE INTEGRATION STEP RATHER THAN AS A CURVATURE
+  // THRESHOLD, and that is not a stylistic choice — the first version compared
+  // the profile's second difference at the car's own segment against gravity,
+  // and the car drove straight into the hole at every speed from 70 to 274mph.
+  // The reason is worth remembering: dt is clamped at 0.1s, so at racing speed
+  // the car advances three and a half segments per frame, and the ONE segment
+  // where the ramp's curvature is sharp was simply stepped over. A launch
+  // window a single segment wide is a launch window a slow phone never sees.
+  // This form cannot be skipped, because it asks about the ground the car is
+  // actually about to cross rather than about a point it might jump past.
+  //
+  // GRAVITY IS 85 AND IT IS NOT 9.8. World units are not metres — the road is
+  // 18 across — and the number that matters is the arc it draws at the speeds
+  // this game runs at. At 85 the jump lasts about a second at racing speed,
+  // which is long enough to see the horizon move and short enough not to feel
+  // like a cutscene.
+  const roadYAt = (d) => {
+    const sg = Math.floor(d / SEG_LEN);
+    const a = ((sg % track.n) + track.n) % track.n;
+    const f2 = d / SEG_LEN - sg;
+    return track.hill[a] + (track.hill[(a + 1) % track.n] - track.hill[a]) * f2;
+  };
+  const slopeAt = (d) => {
+    const sg = Math.floor(d / SEG_LEN);
+    const a = ((sg % track.n) + track.n) % track.n;
+    return (track.hill[(a + 1) % track.n] - track.hill[a]) / SEG_LEN;
+  };
+  // ---- AND IT IS SUBSTEPPED, BELOW THE SIZE OF A SEGMENT ------------------
+  //
+  // This is the third form of this test and the first one that works, so it is
+  // worth saying what the other two got wrong, because both looked right.
+  //
+  // The first compared the elevation profile's curvature at the car's own
+  // segment against gravity. dt is clamped at 0.1s, so at racing speed the car
+  // advances three and a half segments per frame and simply stepped over the
+  // one segment where the ramp's curvature is sharp. It drove into the hole at
+  // every speed from 70 to 274mph.
+  //
+  // The second asked the honest question — "given the slope I was on, am I
+  // above the road where I have arrived" — across the WHOLE frame. That is
+  // unskippable but it is also an average, and across 21 units of ground the
+  // ramp is still climbing for most of the span: the four units it rises drown
+  // the twelve units of flattening at the very top. It cleared the gap at
+  // 180mph and dropped into it at 202, 240 and 274, which is a bridge whose
+  // behaviour depends on the frame rate — the worst kind of bug to ship to a
+  // phone, because it would work here and fail on his.
+  //
+  // So the vertical integration runs at its own resolution: steps of at most
+  // half a segment, however long the frame was. Ten iterations of four array
+  // reads at the very worst, against a frame budget of 33ms. The horizontal
+  // motion is untouched — only the question "is the ground still under me"
+  // needs to be asked more often than the renderer draws.
+  const travelled = st.speed * dt;
+  const nsub = Math.max(1, Math.min(12, Math.ceil(travelled / (SEG_LEN * 0.5))));
+  const hdt = dt / nsub, hstep = travelled / nsub;
+  if (!tune.freeze) {
+    let d = st.dist - travelled;
+    for (let k = 0; k < nsub; k++) {
+      const d0 = d, d1 = d + hstep;
+      d = d1;
+      if (!st.air) {
+        if (race.state === 'crash') break;
+        const vyRoad = st.speed * slopeAt(d0);
+        const bal = roadYAt(d0) + vyRoad * hdt - 0.5 * GRAVITY * hdt * hdt;
+        if (st.speed > 1 && bal > roadYAt(d1) + 1e-4) {
+          st.air = 1;
+          st.y = bal;
+          st.vy = vyRoad - GRAVITY * hdt;
+        } else {
+          st.y = roadYAt(d1);
+        }
+      } else {
+        st.vy -= GRAVITY * hdt;
+        st.y += st.vy * hdt;
+        if (st.y <= roadYAt(d1) && race.state !== 'crash') {
+          // TOUCHDOWN — and WHERE it touches down is the whole game here. The
+          // substep is also what makes this landing honest: at frame
+          // resolution the car could come down in the gap and be tested a
+          // segment later, safely past it.
+          if (inGap(track, d1, SEG_LEN)) { crash(); break; }
+          st.air = 0; st.vy = 0; st.y = roadYAt(d1);
+        }
+      }
+    }
+  }
+  // ARRIVING TOO SLOWLY TO LEAVE THE GROUND AT ALL is the other way to fail,
+  // and it needs its own test: a car that crawls over the lip never becomes
+  // airborne, so the landing check above never runs and it would drive across
+  // the missing span on thin air.
+  if (!st.air && !tune.freeze && race.state === 'racing' && inGap(track, st.dist, SEG_LEN)) crash();
+
+  // EVERYTHING IS DRAWN RELATIVE TO THIS, so handing it the CAR's height rather
+  // than the road's is the entire implementation of the jump's camera. The
+  // world drops away underneath you and comes back up to meet you, and the
+  // road, the barrier, the pavement, the buildings and the tunnel all do it
+  // together because they all already subtract this one number.
+  const baseY = st.air ? st.y : roadY;
 
   // The slope under the car, smoothed. Used to pitch the camera, which is what
   // turns "the road ahead is drawn higher" into "I am going up a hill".
-  const slopeNow = (track.hill[(base + 1) % track.n] - track.hill[base]) / SEG_LEN;
   // Frozen along with distance. Leaving this running was enough on its own to
   // make a "frozen" frame non-reproducible: the smoothed slope kept creeping,
   // which moves the camera height and its aim point, which shifts EVERY pixel
@@ -2942,7 +3180,17 @@ function frame(now) {
   // STRAY_MAX leaves a unit and a half of clearance from that measured 12.60,
   // and still lets you get well off the tarmac — the road plus its rumble strip
   // ends at 10.1, so there are two units of pavement to slither along.
-  st.x = clamp(st.x, -STRAY_MAX, STRAY_MAX);
+  // AND THE TUNNEL IS NARROWER THAN THE OPEN ROAD. Its walls stand at 12.0,
+  // which is inboard of STRAY_MAX — the module had to bring them in to 12.0
+  // because at 13.7 the nearest row of city buildings stood INSIDE the tunnel
+  // and lit facades showed through the wall on 4.9% of the frame. It measured
+  // that and said so, including the consequence: at full stray about a unit of
+  // car ends up inside the wall. A wall you can drive through is worse than one
+  // you cannot reach, so the stray limit narrows to match while you are under
+  // it. You still get onto the walkway and still pay the off-road penalty for
+  // being there; you just cannot post the car through the brickwork.
+  const strayNow = tunnel.inside(st.dist) ? TUNNEL_STRAY : STRAY_MAX;
+  st.x = clamp(st.x, -strayNow, strayNow);
 
   // ---- OFF THE TARMAC ------------------------------------------------------
   //
@@ -2970,7 +3218,11 @@ function frame(now) {
   // reporting on the game, and every other row it printed was worthless too.
   if (tune.holdX !== null) st.x = tune.holdX;
 
-  st.off = Math.max(0, (Math.abs(st.x) - ROAD_W) / (STRAY_MAX - ROAD_W));
+  // NOTHING IS UNDER THE TYRES IN MID-AIR. Leaving this running meant a car
+  // flying the gap while drifting wide kept paying the verge's drag and kept
+  // making the verge's rumble, out over a hole with no verge in it.
+  st.off = st.air ? 0
+    : Math.max(0, (Math.abs(st.x) - ROAD_W) / (STRAY_MAX - ROAD_W));
   if (st.off > 0 && !tune.freeze) {
     st.speed -= OFFROAD_DRAG * (st.off ** OFFROAD_BITE) * st.speed * dt;
     if (st.speed < 0) st.speed = 0;
@@ -3044,6 +3296,7 @@ function frame(now) {
   furniture.update(track, base, frac, st.x, baseY);
   PROF.furniture += performance.now() - t3;
   gantry.update(track, base, frac, st.x, baseY);
+  tunnel.update(track, base, frac, st.x, baseY);
   PROF.n++;   // smoothed, not spiky
 
   // --- car pose ---
@@ -3261,6 +3514,13 @@ requestAnimationFrame(frame);
 window.RACER = {
   st, renderer, scene, camera, median, handling, tune, tilt, pedal, wake, fs, track,
   bodyKit, cockpit, scenery, furniture, gantry, PROF,
+  // The barrier, so a harness can hide it and measure what it was covering.
+  // Without a handle on the mesh, "is it on screen and how big is it" can only
+  // be answered by eye, and by eye it was mistaken for the pavement railings.
+  barrier: posts, tunnel,
+  // The bridge's shape and its distances, so a harness measures the jump
+  // against the module's own numbers rather than against a copy of them.
+  bridge: { BRIDGE, lipDist, gapWidth, inGap: (d) => inGap(track, d, SEG_LEN) },
   // The pacing, so a harness can prove the cap draws what it claims rather
   // than trusting the readout that the cap itself writes.
   pace: {
@@ -3275,5 +3535,5 @@ window.RACER = {
   audio,
   consts: { ROAD_W, STEER_RATE, BRAKE_GRIP, CORNER_AUTHORITY, SPEED_STEPS, SEG_LEN, STRAY_MAX,
             GEARS, REDLINE, MPH, RACE_FROM, RACE_LEN, COUNTDOWN, PEDAL_TOP, PEDAL_W,
-            BOOST_DRAIN, BOOST_REFILL, BOOST_ARM, BOOST_TOP },
+            BOOST_DRAIN, BOOST_REFILL, BOOST_ARM, BOOST_TOP, GRAVITY, CRASH_HOLD },
 };

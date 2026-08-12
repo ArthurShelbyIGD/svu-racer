@@ -86,20 +86,25 @@ function markup() {
          line broke after GARAGE and left SETTINGS stranded underneath on its
          own, which reads as five equal choices badly arranged rather than as
          one obvious thing to press and four ways to poke about. -->
-    <div id="mBtns"><button class="mB mBig" id="mRace">RACE</button></div>
+    <!-- TWO ROWS, NEVER THREE, AND FULL SCREEN RIDES WITH RACE.
+         With five buttons in the lower row it wrapped to three lines, and the
+         third pushed RACE up into the car. Anthony: "we are wasting space
+         slightly by having three rows when we only need two. That way the play
+         button doesn't ruin the shot of the car."
+         Putting FULL SCREEN on RACE's line rather than the other one is what
+         makes the count stable: it is the only button here that comes and goes
+         — it hides itself once you are fullscreen — and a row that changes
+         length is a row that reflows the whole page under you. On RACE's line
+         it can appear and vanish without ever moving anything else. -->
+    <div id="mBtns">
+      <button class="mB mBig" id="mRace">RACE</button>
+      <button class="mB mSide" id="mFull">FULL SCREEN</button>
+    </div>
     <div id="mBtns2">
       <button class="mB" id="mTracks">TRACKS</button>
       <button class="mB" id="mTimes">LAP TIMES</button>
       <button class="mB" id="mGarage">GARAGE</button>
       <button class="mB" id="mSettings">SETTINGS</button>
-      <!-- A BUTTON, NOT A SENTENCE. The first attempt at making fullscreen
-           "more obvious" was a line of grey text saying RACE would do it, and
-           Anthony's reply was exact: "by making full screen more obvious I
-           meant a button on the home screen as there is still no obvious way."
-           He is right — a thing you can press is discoverable and a thing you
-           can read is not. It hides itself once you are fullscreen, and turns
-           into an explanation when the browser refuses. -->
-      <button class="mB" id="mFull">FULL SCREEN</button>
     </div>
     <!-- ONE LINE, NOT TWO. The best lap and the fullscreen hint are both a
          single row of small grey text, and stacking them put the front page

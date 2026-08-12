@@ -202,18 +202,46 @@
      has been added the car has come down to pay for it — 34vmin, then 27, now
      21 — because the shortest screen this runs on is 212 CSS pixels tall and
      six buttons plus a title plus a hero image do not fit in it by wishing. */
-  #mCar { width: min(74vmin, 62%); max-height: 21vmin; object-fit: contain;
-          margin: -0.5vmin 0 -2vmin 0; filter: drop-shadow(0 1vmin 2vmin #000a); }
-  #mBtns { display: flex; justify-content: center; position: relative; z-index: 2; }
-  #mBtns2 { display: flex; flex-wrap: wrap; gap: 1.4vmin; justify-content: center;
-            position: relative; z-index: 2; max-width: 96vmin; margin-top: 1.1vmin; }
+  /* NO NEGATIVE MARGIN UNDER IT ANY MORE. The buttons used to be pulled up
+     into the car to save a few pixels back when there were three rows of them;
+     with two there is room, and Anthony's note was specifically that RACE
+     "ruins the shot of the car". It clears it now. */
+  #mCar { width: min(74vmin, 62%); max-height: 30vmin; object-fit: contain;
+          margin: -0.5vmin 0 0.6vmin 0; filter: drop-shadow(0 1vmin 2vmin #000a); }
+  /* RACE, AND FULL SCREEN BESIDE IT. Centred on RACE rather than on the pair,
+     so RACE stays under the car's nose whether the second button is there or
+     not — the whole reason it lives on this row is that it can vanish without
+     shifting anything. */
+  /* A THREE-COLUMN GRID, NOT A CENTRED FLEX ROW, and the difference is the
+     whole point of putting FULL SCREEN here. Centring a flex row centres the
+     PAIR — so RACE sat dead centre with the button hidden and jumped left when
+     it appeared, which is the reflow this arrangement existed to prevent. I
+     wrote the comment claiming it did not before checking that it did.
+     Empty column, RACE, then the side button: RACE is centred on the page in
+     both states and nothing moves when the other one comes or goes. */
+  #mBtns { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+           gap: 1.4vmin; position: relative; z-index: 2; width: min(96vmin, 100%); }
+  #mRace { grid-column: 2; justify-self: center; }
+  .mB.mSide { grid-column: 3; justify-self: start;
+              font-size: max(10px, 2.2vmin); padding: max(7px, 1.2vmin) max(10px, 2vmin);
+              min-height: max(40px, 7vmin); opacity: 0.9; }
+  /* ONE LINE. nowrap is deliberate rather than incidental: these four are a
+     fixed set and they fit at every width this game runs at, so letting them
+     wrap can only ever produce the three-row layout that was just removed. If
+     a fifth is ever added, this is the line that has to be reconsidered. */
+  #mBtns2 { display: flex; flex-wrap: nowrap; gap: 1.2vmin; justify-content: center;
+            position: relative; z-index: 2; margin-top: 1.1vmin; }
+  #mBtns2 .mB { padding-left: max(10px, 2.2vmin); padding-right: max(10px, 2.2vmin); }
   /* AND ON THE SHORTEST SCREENS IT GOES ALTOGETHER. Below about 240px of
      height there is no arrangement of a title, a hero car, six buttons and a
      line of text that fits, and the car is the only one of those four that is
      not load-bearing. It is a picture of the car you are about to sit in; the
      game is three seconds away. Everything else on the page is a thing you
      press or a thing you need to read. */
-  @media (max-height: 245px) {
+  /* Dropping a whole row of buttons bought back enough height that the car
+     survives on the shortest screen again — it only has to give way below
+     200px now, which no phone in the sweep reaches. */
+  @media (max-height: 200px) {
     #mCar { display: none; }
     #mTitle { font-size: 8vmin; margin-bottom: 1vmin; }
   }

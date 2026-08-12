@@ -63,6 +63,12 @@ await page.evaluate(() => { if (window.RACER) window.RACER.renderer.setPixelRati
 // the race, so nothing is being hidden by it — the race's own states are
 // photographed and measured by tools/racedash.mjs.
 await page.evaluate(() => {
+    // GET THE LANDING PAGE OUT OF THE WAY. It is a DOM layer over the canvas,
+    // so a page screenshot photographs the menu rather than the game — which
+    // is exactly how it blinded two of these tools the day it shipped. Tools
+    // that read the WebGL buffer with gl.readPixels never saw the problem,
+    // because the menu is not in that buffer.
+    if (window.RACER.menu) window.RACER.menu.close();
   const R = window.RACER;
   const hold = () => {
     if (R.race.state !== 'racing') { R.race.state = 'racing'; R.race.t = 0; }

@@ -44,6 +44,7 @@ import { buildCockpit, PEDAL_TOP, PEDAL_W } from './car/cockpit.js';
 // The voice. Whole feature in one file; it makes no AudioContext until
 // firstGesture() calls resume(), and wires its own MUTE button. See src/audio.js.
 import { audio } from './audio.js';
+import { buildMenu } from './ui/menu.js';
 
 // ---------------------------------------------------------------- constants
 
@@ -2236,6 +2237,7 @@ function startRace() {
   // player who crashed out of a bad lap would be punished twice for it.
   st.boostLeft = 1; boostArmed = true;
   st.air = 0; st.vy = 0; st.y = 0;
+  crashCardAt = null;
   pedal.brake = false; pedal.boost = false;
 }
 
@@ -2263,18 +2265,38 @@ function crash() {
   race.state = 'crash'; race.t = 0; race.fresh = false;
   st.air = 1;                                  // still falling, and still drawn falling
   audio.crash(st.speed / Math.max(1, tune.maxSpeed));
+  // The card waits for the wreck to land. Slapping it up on the frame of impact
+  // would hide the one thing the player needs to see to understand what they
+  // did wrong, which is the car going into the hole.
+  crashCardAt = st.simT + CRASH_HOLD * 0.75;
 }
 
 /** How long the wreck is held before the lap restarts. Long enough to see what
  *  happened and understand it was the gap; short enough to want another go. */
 const CRASH_HOLD = 2.4;
+/** Sim time at which the wreck has fallen far enough to put the card up, or
+ *  null when there is no wreck. Sim time rather than wall clock, because on a
+ *  slow phone the two are not the same and the card must land after the fall
+ *  has been SEEN, not after a stopwatch says so. */
+let crashCardAt = null;
+
+/** Hand the lap's numbers to the menu. Defined here rather than inline so both
+ *  the finish line and the hole call exactly the same thing. */
+function showResult(crashed) {
+  menu.result({ crashed, elapsed: race.elapsed, topSpeed: race.topSpeed * MPH,
+                best: race.best, fresh: race.fresh });
+}
 
 function stepRace(dt) {
   race.t += dt;
   // THE WRECK. The car goes on falling — st.y is still being integrated below,
   // and nothing here stops it — until the hold expires.
   if (race.state === 'crash') {
-    if (race.t >= CRASH_HOLD) startRace();
+    // NO AUTOMATIC RESTART ANY MORE. It used to drop you straight back on the
+    // grid, which was right when there was nowhere else to go; now there is a
+    // card with RETRY and MENU on it and taking the choice away would be worse
+    // than the wait ever was.
+    if (crashCardAt !== null && st.simT >= crashCardAt) { crashCardAt = null; showResult(true); }
     return;
   }
   if (race.state === 'countdown') {
@@ -2293,6 +2315,12 @@ function stepRace(dt) {
       if (race.bestTop === null || race.topSpeed > race.bestTop) { race.bestTop = race.topSpeed; got = true; }
       race.fresh = got;
       if (got) saveBests();
+      // AND THE MENU COMES BACK UP WITH THE RESULT ON IT. Anthony chose a
+      // results card over tap-to-retry: "Results card, then RETRY or MENU". It
+      // is also where the credits bonus will appear once points land, so the
+      // shape is right for what is coming rather than being a screen that has
+      // to be rebuilt the moment it earns its keep.
+      showResult(false);
     }
     return;
   }
@@ -2547,7 +2575,13 @@ const tilt = {
   raw: 0,             // current angle, degrees
   zero: null,         // neutral point, degrees
   out: 0,             // -1..1
-  invert: false,      // set by the INVERT button; conventions differ
+  invert: false,      // set by the INVERT switch; conventions differ
+  // CAN TILT TAKE OVER AT ALL. `on` latches true the moment the phone reports
+  // a real angle, which is what makes tilt steering appear by itself for
+  // anyone who has it — but it also meant there was no way to refuse it. A
+  // player who would rather use their thumbs, or who is lying on a sofa, now
+  // has a switch, and it gates the latch rather than fighting it.
+  enabled: true,
   axis: '-',          // which axis is being read, for the readout
   angle: 0,           // screen orientation, for the readout
 };
@@ -2594,7 +2628,7 @@ function onTilt(e) {
   if (d < 0) d = 0;
   tilt.out = clamp((d / (TILT_RANGE - TILT_DEAD)) * s, -1, 1);
   // Any real movement takes over from touch, so the two never fight.
-  if (Math.abs(tilt.out) > 0.02) tilt.on = true;
+  if (tilt.enabled && Math.abs(tilt.out) > 0.02) tilt.on = true;
 }
 
 /** Re-zero to however the phone is being held right now. */
@@ -2709,6 +2743,12 @@ function firstGesture() {
   audio.resume();   // browsers refuse audio outside a gesture; iOS starts suspended
   keepAwake();
   goFullscreen();
+  // AND THE MENU IS NOW WHERE THE FIRST TOUCH USUALLY LANDS, which is better
+  // than it sounds: all four of those permissions come off a button that says
+  // RACE rather than off a tap the player did not know they were making. But
+  // it means a touch that lands on the menu must NOT also drop the lights —
+  // otherwise reading the settings starts a lap behind the panel.
+  if (menu && menu.isOpen()) return;
   // The first touch also drops the lights. Before that the car sits on the
   // grid with the engine running, which is a better first frame than a car
   // already doing 60 down a road the player has not looked at yet.
@@ -3538,6 +3578,53 @@ function frame(now) {
 requestAnimationFrame(frame);
 
 // Exposed so a harness can read the same numbers the player sees.
+/**
+ * THE LANDING PAGE, AND THE ONLY THINGS IT MAY TOUCH.
+ *
+ * Handed in as an object rather than letting the menu import main.js's state,
+ * so everything the menu can do to the game is listed here in fifteen lines
+ * and cannot quietly grow. If a field is renamed, this breaks loudly in one
+ * place instead of silently in a panel nobody had open at the time.
+ *
+ * The steppers reuse the very same code the old on-screen buttons ran — see
+ * the note in bindPanel about why each of those dials exists. They were a
+ * developer's panel on a player's screen; they are settings now, and nothing
+ * about what they DO has changed.
+ */
+const menu = buildMenu({
+  race: () => { firstGesture(); if (race.state !== 'countdown') startRace(); },
+  read: () => ({
+    best: race.best, bestTop: race.bestTop == null ? null : race.bestTop * MPH,
+    sound: !audio.muted,
+    tilt: tilt.enabled,
+    invert: tilt.invert,
+    readout: !document.body.classList.contains('lean'),
+    // Shown as what they mean, not as an array index. "1.50x" and "30 fps" are
+    // answerable by a tester; "4" and "2" are not.
+    pixels: DPR_STEPS[dprI].toFixed(2) + 'x',
+    cap: DIVISORS[divI] === 1 ? 'none' : Math.round(panelHz / DIVISORS[divI]) + ' fps',
+    scenery: scenery.want === 0 ? 'off' : String(scenery.want),
+  }),
+  toggle: (k) => {
+    if (k === 'sound') audio.setMuted(!audio.muted);
+    else if (k === 'tilt') { tilt.enabled = !tilt.enabled; if (!tilt.enabled) tilt.on = false; else recentreTilt(); }
+    else if (k === 'invert') { tilt.invert = !tilt.invert; recentreTilt(); }
+    else if (k === 'readout') { document.body.classList.toggle('lean'); worst = 0; }
+  },
+  step: (k, d) => {
+    if (k === 'pixels') { dprI = clamp(dprI + d, 0, DPR_STEPS.length - 1); applyDpr(); }
+    // CAP + WALKS DOWN THE LIST towards "none", so the button reads the way the
+    // frame rate moves rather than the way the array is indexed.
+    else if (k === 'cap') { divI = clamp(divI - d, 0, DIVISORS.length - 1); vsyncN = 0; worst = 0; }
+    else if (k === 'scenery') {
+      const n = scenery.want;
+      const next = d > 0 ? (n === 0 ? 100 : n * 2) : Math.floor(n / 2);
+      scenery.count = next < 25 ? 0 : next;
+    }
+  },
+});
+
+
 window.RACER = {
   st, renderer, scene, camera, median, handling, tune, tilt, pedal, wake, fs, track,
   bodyKit, cockpit, scenery, furniture, gantry, PROF,
@@ -3545,6 +3632,13 @@ window.RACER = {
   // Without a handle on the mesh, "is it on screen and how big is it" can only
   // be answered by eye, and by eye it was mistaken for the pavement railings.
   barrier: posts, tunnel,
+  // THE MENU, so a harness can get it out of the way. It is a DOM layer over
+  // the canvas, which means every tool that takes a page screenshot now
+  // photographs the landing page unless it says otherwise — and that is not
+  // theoretical: it silently blinded two of them the moment it shipped. Tools
+  // that read the WebGL buffer directly with gl.readPixels are unaffected,
+  // because the menu is not in it.
+  menu,
   // The bridge's shape and its distances, so a harness measures the jump
   // against the module's own numbers rather than against a copy of them.
   bridge: { BRIDGE, lipDist, gapWidth, inGap: (d) => inGap(track, d, SEG_LEN) },

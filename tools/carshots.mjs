@@ -26,6 +26,12 @@ if (errs.length) console.log('ERRORS:', errs.join(' | '));
 
 // Hide the debug furniture so the frames show the game, not the readout.
 await page.evaluate(() => {
+    // GET THE LANDING PAGE OUT OF THE WAY. It is a DOM layer over the canvas,
+    // so a page screenshot photographs the menu rather than the game — which
+    // is exactly how it blinded two of these tools the day it shipped. Tools
+    // that read the WebGL buffer with gl.readPixels never saw the problem,
+    // because the menu is not in that buffer.
+    if (window.RACER.menu) window.RACER.menu.close();
   for (const id of ['hud', 'note', 'ctl']) {
     const e = document.getElementById(id);
     if (e) e.style.display = 'none';

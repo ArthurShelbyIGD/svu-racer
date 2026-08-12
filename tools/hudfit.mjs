@@ -42,18 +42,32 @@ for (const s of SCREENS) {
   await page.waitForFunction(() => window.RACER, null, { timeout: 30000 });
   await page.evaluate(() => {
     window.RACER.renderer.setPixelRatio(0.5);
-    document.getElementById('bTog').click();          // open the panel
+    // LEAVE THE MENU FIRST. The landing page is up at boot and hides the
+    // readout with it, so this rig was measuring a 0x0 element on every screen
+    // and reporting "fits" — and its own self-check went blind at the same
+    // moment, which is the only reason it was noticed. Press RACE, the way a
+    // player reaches the track.
+    document.getElementById('mRace').click();
+    document.getElementById('bTog').click();          // and show the numbers
   });
   await page.waitForTimeout(900);                     // past one HUD refresh
   const m = await page.evaluate(() => {
     const h = document.getElementById('hud');
     const r = h.getBoundingClientRect();
-    // THE BUTTONS COUNT AS AN EDGE. The first version of this test measured the
-    // panel against the WINDOW only, passed everything, and the second column
-    // was running underneath the control grid the whole time — unreadable in
-    // precisely the screenshot the panel exists to be. Checking one boundary
-    // and calling it "fits" is how a fit test lies to you.
-    const c = document.getElementById('ctl').getBoundingClientRect();
+    // THE BUTTONS USED TO COUNT AS AN EDGE, and this is the history of why.
+    // The first version measured the panel against the WINDOW only, passed
+    // everything, and the second column was running underneath the control
+    // grid the whole time — unreadable in precisely the screenshot the panel
+    // exists to be. Checking one boundary and calling it "fits" is how a fit
+    // test lies to you.
+    //
+    // The grid has now left the screen entirely: every control it held is in
+    // the landing page's Settings, and #ctl is display:none. So the only edge
+    // left is the window's, and pretending otherwise would mean measuring
+    // against a rectangle that is permanently 0x0 — which is not a stricter
+    // test, it is no test. If a panel ever comes back to the track, put its
+    // rect back in here.
+    const c = { left: window.innerWidth, bottom: 0 };
     // the widest line of real text, not the block's own width
     let textRight = 0;
     for (const el of h.querySelectorAll('span')) {
@@ -103,6 +117,7 @@ for (const s of SCREENS) {
   await page.waitForFunction(() => window.RACER, null, { timeout: 30000 });
   await page.evaluate(() => {
     window.RACER.renderer.setPixelRatio(0.5);
+    document.getElementById('mRace').click();
     document.getElementById('bTog').click();
     const st = document.createElement('style');
     st.textContent = '#hcols{display:block}#stats,#stats2{display:inline}';

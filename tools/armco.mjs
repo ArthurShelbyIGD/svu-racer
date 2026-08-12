@@ -1,3 +1,51 @@
+// RETIRED, DELIBERATELY, AND KEPT FOR ITS REASONING.
+//
+// This tool answered one question: is the Armco at least as good as the teal
+// posts it replaced, at the one job the posts existed for — hard edges whipping
+// past at the side of vision. It answered it (peripheral pixels changed per
+// frame 0.66 -> 1.18, outer fifth of the screen 0.3% -> 5.3% covered, one draw
+// call either way), the barrier shipped on the strength of it, and `class
+// Posts` was then deleted from main.js because nothing referenced it.
+//
+// Which means the BEFORE half can no longer be built. The tool patches main.js
+// to swap the barrier back out for the posts, and the line it patches is gone.
+//
+// There were three ways to leave it and only one of them is honest:
+//
+//   - Leave it throwing. A permanently red tool in the suite teaches everyone
+//     to ignore red tools, which is how the next real failure gets missed.
+//   - Let the BEFORE run against the current build anyway. It would then
+//     measure the ARMCO and label the column "posts", and print a comparison
+//     of a thing against itself as though it meant something. This is the
+//     worst option and it is also the easiest one to reach by accident.
+//   - Say the comparison is over.
+//
+// It is over. What the barrier costs on its own is still measured, every run,
+// by tools/check.mjs (draw calls at the worst moment) and photographed by
+// tools/menufit.mjs and tools/iphone.mjs. If posts ever come back, the git
+// history has this file working.
+//
+// The numbers it produced, and the caveats that came with them, are in the
+// header of src/world/barrier.js — including the one worth remembering: the
+// sense-of-speed figure moved between 1.03x and 1.97x depending on how a peak
+// was detected. Above 1 every time, so the direction held; the magnitude never
+// did, and it was reported that way rather than at its most flattering.
+console.log(`
+  tools/armco.mjs is RETIRED.
+
+  It compared the Armco barrier against the teal posts it replaced. The posts
+  were deleted from main.js when the barrier shipped, so the BEFORE half cannot
+  be built any more and a comparison against nothing is not a measurement.
+
+  What it found, before it went: peripheral motion 1.8x the posts', the outer
+  fifth of the screen 0.3% -> 5.3% covered, and the same single draw call. The
+  full numbers and their caveats are in the header of src/world/barrier.js.
+
+  The barrier's ongoing cost is checked by tools/check.mjs on every run.
+`);
+process.exit(0);
+
+/* eslint-disable */
 // WHAT DOES SWAPPING THE POSTS FOR ARMCO ACTUALLY COST, AND WHAT DOES IT BUY?
 //
 //   node tools/armco.mjs            the full run, about four minutes
@@ -141,7 +189,14 @@ function patchMain() {
   const imp = "import { buildFurniture } from './world/furniture.js';";
   const ctor = 'const posts = new Posts(scene, 120);';
   if (!s.includes(imp)) throw new Error('main.js: import anchor not found');
-  if (!s.includes(ctor)) throw new Error('main.js: `const posts = new Posts(scene, 120);` not found — the paste-in instructions in barrier.js are stale');
+  // THE COMPARISON HAS AN EXPIRY DATE AND IT HAS EXPIRED. This tool exists to
+  // answer "is the Armco at least as good as the posts it replaces", which it
+  // did; the barrier then shipped and `class Posts` was deleted, so the BEFORE
+  // half can no longer be reconstructed. Throwing here would leave a red tool
+  // in the suite for a comparison nobody can run and nobody needs. It skips
+  // the before/after and measures the barrier on its own instead, and says so
+  // out loud rather than quietly reporting half a result.
+  if (!s.includes(ctor)) return false;
   s = s.replace(imp, imp + "\nimport { buildBarrier } from './world/barrier.js';");
   s = s.replace(ctor,
     'const posts = buildBarrier({ scene, palette: PAL, ink: INK, roadW: ROAD_W,\n' +
@@ -183,6 +238,12 @@ async function session(fn, { shot = null } = {}) {
   // Find the mesh under test. The barrier flags itself with userData.armco;
   // the posts are identified by PAL.post, which nothing else in the scene uses.
   await page.evaluate(() => {
+    // GET THE LANDING PAGE OUT OF THE WAY. It is a DOM layer over the canvas,
+    // so a page screenshot photographs the menu rather than the game — which
+    // is exactly how it blinded two of these tools the day it shipped. Tools
+    // that read the WebGL buffer with gl.readPixels never saw the problem,
+    // because the menu is not in that buffer.
+    if (window.RACER.menu) window.RACER.menu.close();
     window.__find = (which) => {
       let hit = null;
       window.RACER.scene.traverse((o) => {
@@ -659,7 +720,10 @@ try {
 
   // ------------------------------------------------------------- AFTER
   console.log('=== AFTER: the Armco barrier ==========================================');
-  patchMain();
+  if (patchMain() === false) {
+    console.log('  (the posts are gone from main.js, so there is no BEFORE to compare');
+    console.log('   against any more — measuring the barrier on its own.)');
+  }
   results.after = await session(async (page) => {
     const dist = results.before.dist;
     const base = { rate: RATE, n: N, speed: SPEED, dist0: dist.straight };
@@ -856,3 +920,4 @@ console.log(`    the measurements above ran at ${B.dist.straight.toFixed(0)}, th
 const status = execFileSync('git', ['status', '--porcelain', 'src/main.js'], { cwd: ROOT }).toString().trim();
 console.log('\n  src/main.js after the run: ' + (status ? 'MODIFIED — ' + status : 'clean, as it must be'));
 console.log('');
+/* end of the retired tool */

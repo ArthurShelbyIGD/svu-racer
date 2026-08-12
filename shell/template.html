@@ -130,6 +130,125 @@
     padding: 10px 12px max(10px, env(safe-area-inset-bottom)) 12px;
     font-size: 12px; color: #8a8b93; text-align: center;
     background: linear-gradient(#0000, #000b); pointer-events: none; }
+
+  /* ---- THE LANDING PAGE ----
+     A stack over the canvas rather than a second page: one HTML file is the
+     rule, and it means the game is already built and idling on the grid behind
+     the menu, so RACE is a class change and not a load.
+
+     EVERY SIZE HERE IS IN vmin, NOT px OR vh. The page has to work from a
+     672x280 phone in a browser with its chrome showing up to a 932x430 iPhone
+     at three times the pixel density, and the thing that actually varies
+     between those is not width or height on its own — it is the SHORTER of the
+     two, which on a landscape phone is always the height. Sizing from vmin
+     means the menu shrinks when the address bar appears instead of running off
+     the bottom, which is the failure the readout hit twice before it was
+     measured. tools/menufit.mjs checks it on six screens. */
+  #menu { position: fixed; inset: 0; display: none; z-index: 40;
+          font-family: inherit; color: #e8e6df; overflow: hidden; }
+  #menu.show { display: block; }
+  /* The city sits under everything and is deliberately not sharp: it is a
+     704px image on a screen that may be 2796 device pixels across. Scaled to
+     cover and pushed back with a scrim, which is what a background is for. */
+  #mBg { position: absolute; inset: 0; background-size: cover;
+         background-position: center 62%; }
+  #mScrim { position: absolute; inset: 0;
+            background: radial-gradient(120% 90% at 50% 42%, #0b0d1466 0%, #0b0d14dd 72%, #0b0d14f2 100%); }
+
+  .mPanel { position: absolute; inset: 0; display: none;
+            flex-direction: column; align-items: center; justify-content: center;
+            padding: max(2vmin, env(safe-area-inset-top)) 3vmin max(2vmin, env(safe-area-inset-bottom)) 3vmin; }
+  .mPanel.on { display: flex; }
+
+  #mTitle { font-size: 7.5vmin; letter-spacing: 0.14em; font-weight: 700;
+            text-shadow: 0 0.4vmin 1.6vmin #000c; margin-bottom: 0.4vmin; }
+  .mSvu { color: #8ee23f; }
+  /* The car overlaps the buttons slightly and sits behind them, which is what
+     stops the page reading as a title, a picture and a list stacked in three
+     separate bands. */
+  #mCar { width: min(74vmin, 62%); max-height: 34vmin; object-fit: contain;
+          margin: -0.5vmin 0 -3vmin 0; filter: drop-shadow(0 1vmin 2vmin #000a); }
+  #mBtns { display: flex; justify-content: center; position: relative; z-index: 2; }
+  #mBtns2 { display: flex; flex-wrap: wrap; gap: 1.4vmin; justify-content: center;
+            position: relative; z-index: 2; max-width: 96vmin; margin-top: 1.4vmin; }
+  #mBest { margin-top: 1.8vmin; font-size: 2.4vmin; color: #9aa0ad; letter-spacing: 0.06em; }
+
+  /* THE BUTTONS ARE BIG BECAUSE THIS IS A PHONE. 9vmin of height on a 280px
+     viewport is 25px, which is under the 44px everybody agrees a thumb needs —
+     so there is a px floor under the vmin. The floor is what actually applies
+     on the smallest screen and the vmin is what applies on the largest. */
+  .mB { font: inherit; font-size: max(11px, 2.6vmin); letter-spacing: 0.08em;
+        color: #e8e6df; background: #171a22cc; border: 1px solid #3a4150;
+        border-radius: 1vmin; padding: max(9px, 1.7vmin) max(14px, 3vmin);
+        min-height: max(40px, 8vmin); cursor: pointer;
+        -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+  .mB:active { background: #232836; }
+  .mB.mBig { background: #2f7d1acc; border-color: #8ee23f;
+             font-size: max(13px, 3.2vmin); padding-left: max(22px, 5vmin); padding-right: max(22px, 5vmin); }
+  .mB.mBig:active { background: #3f9a26; }
+
+  .mCard { background: #0b0d14ee; }
+  .mCard h2 { font-size: 4vmin; letter-spacing: 0.12em; margin: 0 0 2vmin 0; font-weight: 700; }
+  .mCard p { max-width: 74vmin; text-align: center; font-size: max(11px, 2.4vmin);
+             line-height: 1.5; color: #9aa0ad; margin: 0 0 2.5vmin 0; }
+  .mCard .mBack { margin-top: 2.5vmin; }
+  .mRow2 { display: flex; gap: 1.6vmin; margin-top: 2.5vmin; }
+  .rBig { color: #e8e6df !important; font-size: max(13px, 3vmin) !important; }
+  .rNote { font-size: max(10px, 2.1vmin) !important; }
+
+  /* NOWRAP ON BOTH SIDES. "TOP SPEED" and "271 mph" both broke over two lines
+     in the results card at 844x390 — a flex row will happily wrap its children
+     to honour a gap, and the gap was 6vmin. These are labels and numbers, not
+     prose; they should push the row wider or shrink, never fold. */
+  .tRow { display: flex; justify-content: space-between; align-items: baseline;
+          gap: 4vmin; width: min(84vmin, 94%); padding: 1.2vmin 0;
+          border-bottom: 1px solid #232836; font-size: max(11px, 2.5vmin); }
+  .tRow span { color: #9aa0ad; letter-spacing: 0.08em; white-space: nowrap; }
+  .tRow b { font-size: max(14px, 3.4vmin); white-space: nowrap; }
+  .tRow b.good { color: #8ee23f; }
+  .tNote { margin-top: 2vmin !important; }
+
+  /* SETTINGS SCROLLS, and it is the only thing here that does. Seven rows with
+     their explanations do not fit a 280px-tall phone at any font size worth
+     reading, and the alternative — dropping the explanations — would leave a
+     row called CAP that nobody outside this repo could interpret. */
+  /* THE FADE AT THE BOTTOM IS NOT DECORATION. Photographed at 844x390 the list
+     simply stopped mid-row at FRAME CAP with a hard edge, which reads as a
+     rendering fault rather than as "there is more below" — and a setting
+     nobody knows is there is a setting that does not exist. A mask that eats
+     the last few millimetres says scroll without a word or an arrow. */
+  #sWrap { position: relative; width: min(84vmin, 96%); }
+  #sWrap::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0;
+                  height: 7vmin; pointer-events: none;
+                  background: linear-gradient(#0b0d1400, #0b0d14ee); }
+  #sBody { width: 100%; overflow-y: auto; -webkit-overflow-scrolling: touch;
+           max-height: 58vmin; padding-bottom: 5vmin; touch-action: pan-y; }
+  .sRow { display: flex; align-items: center; justify-content: space-between;
+          gap: 3vmin; padding: 1.4vmin 0; border-bottom: 1px solid #232836; }
+  .sText { text-align: left; }
+  .sLabel { font-size: max(11px, 2.5vmin); letter-spacing: 0.08em; }
+  .sNote { font-size: max(9px, 1.9vmin); color: #7b8290; line-height: 1.4; margin-top: 0.4vmin; }
+  .sCtl { display: flex; align-items: center; gap: 1.2vmin; flex: none; }
+  .sSw { min-width: max(56px, 12vmin); }
+  .sSw.on { background: #2f7d1acc; border-color: #8ee23f; }
+  .sStep { min-width: max(40px, 8vmin); padding-left: 0; padding-right: 0; }
+  .sVal { min-width: max(52px, 11vmin); text-align: center;
+          font-size: max(10px, 2.2vmin); color: #9aa0ad; }
+
+  /* WHILE THE MENU IS UP, THE TRACK'S OWN FURNITURE GOES. The note, the control
+     panel and the readout are all for someone who is driving. */
+  body.inMenu #note, body.inMenu #hud { display: none !important; }
+
+  /* THE OLD ON-TRACK PANEL IS GONE FROM THE SCREEN BUT NOT FROM THE PAGE.
+     Everything it did is in Settings now. It stays in the DOM, hidden, for one
+     reason: tools/nosdash.mjs presses SCENERY minus forty times to clear seven
+     thousand buildings before it photographs the dashboard, and two other
+     harnesses reach for these ids as well. A hidden button still answers
+     .click(), so the rigs keep working and the player never sees a control
+     panel bolted to their windscreen. Delete the div and three tools go dark
+     at once — which is exactly the kind of breakage that gets discovered a
+     week later by a screenshot that looks subtly wrong. */
+  #ctl { display: none !important; }
 </style>
 </head>
 <body class="lean">

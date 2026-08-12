@@ -312,6 +312,13 @@ const after = await p.evaluate(async () => {
     };
     requestAnimationFrame(step);
   });
+  // START FROM A CLEAN SCREEN. Earlier sections of this rig cross the finish
+  // line, which puts a results card up and leaves it there — so the wait below
+  // saw a card that was already showing, read "NEW BEST" off the last lap and
+  // reported the crash card as saying the wrong thing. The bug was in the rig,
+  // but the failure it printed was indistinguishable from a real one.
+  if (R.menu) R.menu.close();
+  document.getElementById('rTitle').textContent = '';
   R.startRace();
   await sim(R.consts.COUNTDOWN + 0.3);
   R.tune.holdX = 0;
@@ -331,24 +338,44 @@ const after = await p.evaluate(async () => {
   const inWreck = { state: R.race.state, y0: R.st.y, elapsed: R.race.elapsed };
   await sim(0.6);
   const fellBy = inWreck.y0 - R.st.y;
-  // and out the other side
+  // AND THEN THE CARD, NOT AN AUTOMATIC RESTART. The crash used to drop you
+  // straight back on the grid after CRASH_HOLD, which was right when there was
+  // nowhere else to go. There is a landing page now, and Anthony asked for
+  // "results card, then RETRY or MENU" — so the wreck ends with a card and the
+  // game WAITS. A test that still expects the grid is testing last week.
   let guard = 0;
-  while (R.race.state === 'crash' && guard++ < 200) await sim(0.15);
+  while (R.race.state === 'crash' && guard++ < 200
+         && document.getElementById('rTitle').textContent === '') await sim(0.15);
+  const card = {
+    up: document.getElementById('menu').classList.contains('show'),
+    panel: document.getElementById('pResult').classList.contains('on'),
+    title: document.getElementById('rTitle').textContent,
+  };
+  // RETRY has to put you back on the grid with everything reset.
+  document.getElementById('rRetry').click();
+  await sim(0.4);
   const back = { state: R.race.state, dist: R.st.dist, boost: R.st.boostLeft,
                  elapsed: R.race.elapsed, air: R.st.air, speed: R.st.speed };
   R.tune.holdX = null;
-  return { inWreck, fellBy, back, from: R.consts.RACE_FROM };
+  return { inWreck, fellBy, card, back, from: R.consts.RACE_FROM };
 });
 console.log(`   crawling into the gap    state '${after.inWreck.state}' at ${after.inWreck.elapsed.toFixed(1)}s`);
 console.log(`   the wreck keeps falling  ${after.fellBy.toFixed(1)} units in the first 0.6s`);
-console.log(`   afterwards               state '${after.back.state}', dist ${after.back.dist.toFixed(0)}, ` +
+console.log(`   the card                 "${after.card.title}", menu up ${after.card.up}`);
+console.log(`   after RETRY              state '${after.back.state}', dist ${after.back.dist.toFixed(0)}, ` +
             `bottle ${after.back.boost.toFixed(2)}, lap clock ${after.back.elapsed.toFixed(1)}s`);
 ok(after.inWreck.state === 'crash', 'crawling into the gap ends the lap', `state '${after.inWreck.state}'`);
 ok(after.fellBy > 1,
    'the wreck goes on falling rather than hanging over the hole',
    `${after.fellBy.toFixed(1)} units in 0.6s`);
+ok(after.card.up && after.card.panel,
+   'the wreck ends with the results card, not with an automatic restart',
+   `"${after.card.title}"`);
+ok(/HOLE/i.test(after.card.title),
+   'and the card says what happened rather than just reporting a time',
+   `"${after.card.title}"`);
 ok(after.back.state === 'countdown' || after.back.state === 'racing',
-   'and then the lap restarts', `state '${after.back.state}'`);
+   'and RETRY puts you back on the grid', `state '${after.back.state}'`);
 ok(after.back.boost === 1, 'with a full bottle', `${after.back.boost}`);
 ok(after.back.elapsed < 1, 'and the lap clock back at zero', `${after.back.elapsed.toFixed(2)}s`);
 ok(after.back.air === 0, 'and the car back on the ground', `air ${after.back.air}`);

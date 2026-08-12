@@ -69,6 +69,12 @@ await page.waitForFunction(() => window.RACER, null, { timeout: 30000 });
 // difference measurement is only a measurement of one thing if everything else
 // holds still.
 await page.evaluate(() => {
+    // GET THE LANDING PAGE OUT OF THE WAY. It is a DOM layer over the canvas,
+    // so a page screenshot photographs the menu rather than the game — which
+    // is exactly how it blinded two of these tools the day it shipped. Tools
+    // that read the WebGL buffer with gl.readPixels never saw the problem,
+    // because the menu is not in that buffer.
+    if (window.RACER.menu) window.RACER.menu.close();
   const R = window.RACER;
   R.st.view = 1; R.st.speed = 0; R.st.steer = 0;
   R.tilt.on = false; R.tilt.out = 0;
@@ -325,6 +331,8 @@ for (const s of [{ w: 800, h: 450, name: '16:9' }, { w: 640, h: 360, name: '16:9
   await p2.waitForFunction(() => window.RACER, null, { timeout: 30000 });
   await p2.evaluate(() => {
     const R = window.RACER;
+    // The second page needs the menu closed as much as the first one does.
+    if (R.menu) R.menu.close();
     R.st.view = 1; R.st.speed = 0; R.st.steer = 0;
     R.tilt.on = false; R.tune.freeze = true; R.tune.holdX = 0;
     R.renderer.setPixelRatio(1);

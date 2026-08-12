@@ -280,3 +280,58 @@ proven we can afford 20,000 objects. We are currently spending that budget on
   of the strongest speed cues there is.
 - **Nitro as a visual event**, not just a number: their boost fires a bright
   streak under the car and washes the screen edges.
+
+---
+
+# The start page art (11 August 2026)
+
+Three images, made by Anthony for the front page, and kept here at 704px wide
+as WORKING COPIES. The masters are on his machine in
+`Downloads/svu-racer-images/` at 1408x768 — that folder is the durable one, this
+repo is not. Do not treat these as the originals.
+
+| here | master | what it is |
+|---|---|---|
+| `start-car-blower.png` | `blower.png` | three-quarter front, **supercharger through the bonnet** |
+| `start-car-scoop.png` | `bonnet-intake.png` | the same car with a **cowl scoop** instead |
+| `start-cityscape.png` | `cityscape.png` | night street, moon, receding towers |
+
+Both cars are transparent PNGs and both crop to the same box — 114,139 to
+1310,684 of 1408x768 — so they are the same render with the bonnet swapped, and
+either can be dropped in for the other without moving anything on the page.
+
+The cityscape is already in the game's palette: a night street looking down the
+canyon between towers, which is the same shot the player sees through the
+windscreen. That is worth knowing before anyone recolours anything.
+
+## WHAT THEY COST IN THE BUNDLE, measured rather than guessed
+
+The whole game is 598K of one HTML file today, and every byte of a base64
+image is a byte the phone downloads before it can play. Measured with an octree
+palette and optimised PNG; the "in bundle" column is after base64, which adds a
+third:
+
+```
+  the car, alpha trimmed          the cityscape
+  384x175   32 colours   15K      512x279   32 colours    62K
+  512x233   32 colours   24K      704x384   32 colours   109K
+  640x292   32 colours   33K      896x489   32 colours   166K
+  640x292  128 colours   62K      896x489  128 colours   192K
+```
+
+TWO THINGS FALL OUT OF THAT TABLE and both are worth reading before choosing.
+
+**The car quantises beautifully and the city does not.** Going from 32 colours
+to 128 costs the car 88% more and buys very little — it is flat comic panels
+with hard ink lines, which is exactly what a small palette is for. The city
+barely moves between 32 and 128 (109K against 125K), because its cost is not
+colour count but the sheer number of lit windows: thousands of small
+high-contrast rectangles, which is the worst case there is for PNG's row
+filters. If the city needs to be cheaper, the lever is RESOLUTION, not palette.
+
+**A start page is not a frame.** None of this touches the draw-call budget or
+the frame time — it is drawn once, in HTML, and then thrown away. The only
+budget it spends is download size. 704px of cityscape plus 512px of car is
+about 133K on a 598K game: a 22% heavier download for the first thing anyone
+ever sees. That is probably worth it, but it is a decision and not a detail,
+and it is Anthony's to make.

@@ -16,6 +16,29 @@
 <link rel="manifest" href='data:application/manifest+json,{"name":"Racer","short_name":"Racer","display":"fullscreen","orientation":"landscape","background_color":"%230b0d14","theme_color":"%230b0d14","start_url":"."}'>
 <title>Racer</title>
 <style>
+  /* ---- THE EDGES OF THE GLASS THAT ARE NOT YOURS ----
+     Android in LANDSCAPE puts its gesture bar down one SIDE, not along the
+     bottom, and an in-app browser adds its own furniture on top of that. On
+     Anthony's wife's Samsung — a 592x212 CSS viewport at dpr 2.81, in a webview
+     that refuses fullscreen outright — the control panel pinned to `right: 8px`
+     ran straight underneath the system bar. His report: "the right hand buttons
+     are half covered and extremely difficult to use. I couldn't even get the
+     full screen one to work... a new player would just close the app and write
+     it off as useless."
+     Every layer of UI here had insets on the TOP and BOTTOM and none on the
+     SIDES, which in portrait is invisible and in landscape is the whole
+     problem. These four hold every edge in one place.
+     THEY ARE CUSTOM PROPERTIES RATHER THAN env() USED DIRECTLY, and that is so
+     they can be MEASURED. There is no way to make a headless browser report a
+     safe-area inset, so a test could only ever confirm the CSS was written —
+     never that it worked. tools/menufit.mjs overrides these four with real
+     Android values and re-runs the whole fit sweep against them. */
+  :root {
+    --sat: env(safe-area-inset-top, 0px);
+    --sar: env(safe-area-inset-right, 0px);
+    --sab: env(safe-area-inset-bottom, 0px);
+    --sal: env(safe-area-inset-left, 0px);
+  }
   *, *::before, *::after { box-sizing: border-box; }
   html, body {
     margin: 0; padding: 0; height: 100%; overflow: hidden;
@@ -43,7 +66,7 @@
        other. 196px is the grid at its widest (two 82px buttons, a 6px gap and
        its 8px right offset) plus a little air. */
     position: fixed; top: 0; left: 0; right: 196px;
-    padding: max(10px, env(safe-area-inset-top)) 12px 10px 12px;
+    padding: max(10px, var(--sat)) calc(12px + var(--sar)) 10px calc(12px + var(--sal));
     /* 11px, NOT 13. Measured on Anthony's phone: a 1440x720 canvas at dpr 2.00
        is a 360px-tall CSS viewport, and eighteen lines at 13px came to about
        416px — so the device line clipped mid-word and the two most useful lines
@@ -81,7 +104,7 @@
      The bottom corners are the brake and the boost now, and a test button you
      hit while braking is a test button in the wrong place. */
   #ctl {
-    position: fixed; right: 8px; top: max(8px, env(safe-area-inset-top));
+    position: fixed; right: calc(8px + var(--sar)); top: max(8px, var(--sat));
     display: grid; grid-template-columns: repeat(2, auto);
     gap: 6px; z-index: 5;
   }
@@ -127,7 +150,7 @@
     word-break: break-word; }
   #fail b { color: #ff6b5e; font-size: 16px; }
   #note { position: fixed; left: 0; right: 0; bottom: 0;
-    padding: 10px 12px max(10px, env(safe-area-inset-bottom)) 12px;
+    padding: 10px calc(12px + var(--sar)) max(10px, var(--sab)) calc(12px + var(--sal));
     font-size: 12px; color: #8a8b93; text-align: center;
     background: linear-gradient(#0000, #000b); pointer-events: none; }
 
@@ -157,21 +180,30 @@
 
   .mPanel { position: absolute; inset: 0; display: none;
             flex-direction: column; align-items: center; justify-content: center;
-            padding: max(2vmin, env(safe-area-inset-top)) 3vmin max(2vmin, env(safe-area-inset-bottom)) 3vmin; }
+            padding: max(2vmin, var(--sat)) calc(3vmin + var(--sar))
+                     max(2vmin, var(--sab)) calc(3vmin + var(--sal)); }
   .mPanel.on { display: flex; }
 
-  #mTitle { font-size: 7.5vmin; letter-spacing: 0.14em; font-weight: 700;
-            text-shadow: 0 0.4vmin 1.6vmin #000c; margin-bottom: 0.4vmin; }
+  /* SIZED FOR THE SHORTEST SCREEN THERE IS, which is a 592x212 CSS viewport —
+     an in-app browser in landscape on a mid-range Samsung. At the first set of
+     numbers the front page was four pixels too tall there: not a disaster, but
+     the front page is the one screen that must never need scrolling, and four
+     pixels of overflow on a phone somebody is meeting the game on for the
+     first time is four pixels too many. There is about twenty pixels of slack
+     in it now. */
+  #mTitle { font-size: 7vmin; letter-spacing: 0.14em; font-weight: 700;
+            text-shadow: 0 0.4vmin 1.6vmin #000c; margin-bottom: 0.2vmin; }
   .mSvu { color: #8ee23f; }
   /* The car overlaps the buttons slightly and sits behind them, which is what
      stops the page reading as a title, a picture and a list stacked in three
      separate bands. */
-  #mCar { width: min(74vmin, 62%); max-height: 34vmin; object-fit: contain;
-          margin: -0.5vmin 0 -3vmin 0; filter: drop-shadow(0 1vmin 2vmin #000a); }
+  #mCar { width: min(74vmin, 62%); max-height: 27vmin; object-fit: contain;
+          margin: -0.5vmin 0 -2.5vmin 0; filter: drop-shadow(0 1vmin 2vmin #000a); }
   #mBtns { display: flex; justify-content: center; position: relative; z-index: 2; }
   #mBtns2 { display: flex; flex-wrap: wrap; gap: 1.4vmin; justify-content: center;
             position: relative; z-index: 2; max-width: 96vmin; margin-top: 1.4vmin; }
-  #mBest { margin-top: 1.8vmin; font-size: 2.4vmin; color: #9aa0ad; letter-spacing: 0.06em; }
+  #mBest { margin-top: 1.2vmin; font-size: max(9px, 2.2vmin); color: #9aa0ad;
+           letter-spacing: 0.06em; text-align: center; }
 
   /* THE BUTTONS ARE BIG BECAUSE THIS IS A PHONE. 9vmin of height on a 280px
      viewport is 25px, which is under the 44px everybody agrees a thumb needs —
@@ -234,6 +266,9 @@
   .sStep { min-width: max(40px, 8vmin); padding-left: 0; padding-right: 0; }
   .sVal { min-width: max(52px, 11vmin); text-align: center;
           font-size: max(10px, 2.2vmin); color: #9aa0ad; }
+  .sVal.sWide { min-width: max(76px, 16vmin); text-align: right; }
+  #mFs { margin-top: 0.6vmin; font-size: max(9px, 2vmin); color: #6f7684;
+         letter-spacing: 0.05em; text-align: center; }
 
   /* WHILE THE MENU IS UP, THE TRACK'S OWN FURNITURE GOES. The note, the control
      panel and the readout are all for someone who is driving. */
@@ -249,6 +284,37 @@
      at once — which is exactly the kind of breakage that gets discovered a
      week later by a screenshot that looks subtly wrong. */
   #ctl { display: none !important; }
+
+  /* ---- THE GEARS ----
+     THESE ARE NOT DEBUG CONTROLS AND I FILED THEM AS ONE. When the landing page
+     took the on-track panel away, GEAR - and GEAR + went with it — and they are
+     the only way to change gear on a phone, so the car was stuck in first with
+     no way out. Anthony, one lap later: "Major bug with the latest version, how
+     to change gear". The old panel's own comment even said it: the speed dial
+     "is now the gearstick", which is a player control wearing a developer's
+     clothes. Sorted by giving them their own layer that has nothing to do with
+     the panel.
+
+     WHERE THEY GO. The bottom corners are the brake and the boost, and the top
+     half steers when tilt is off, so there is no truly empty ground — but these
+     stop the touch reaching the canvas, so overlapping a steering half costs
+     nothing. Right-hand edge, stacked, at thumb height for a phone held in
+     landscape, and INSET so the system gesture bar cannot sit on top of them.
+     That last part is the whole of the bug Anthony hit on the Samsung. */
+  #gears { position: fixed; z-index: 30;
+           right: calc(10px + var(--sar)); top: 50%; transform: translateY(-50%);
+           display: flex; flex-direction: column; gap: 8px; }
+  body.inMenu #gears { display: none; }
+  #gears button {
+    font: inherit; font-size: max(11px, 2.4vmin); letter-spacing: 0.06em;
+    color: #e8e6df; background: #171a22cc; border: 1px solid #3a4150;
+    border-radius: 10px; min-width: max(58px, 11vmin); min-height: max(46px, 9vmin);
+    cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+  #gears button:active { background: #2f7d1acc; border-color: #8ee23f; }
+  /* The lamp on the tacho already says "shift up now". This makes the button it
+     is telling you to press say it too, because a tell-tale that points at a
+     control the player has not found yet is a tell-tale pointing at nothing. */
+  #gears button.want { border-color: #8ee23f; background: #2f7d1a55; }
 </style>
 </head>
 <body class="lean">
@@ -266,7 +332,14 @@
      that duplicated them are gone and the line clears both controls with room
      to spare. tools/pedalshots.mjs measures the gap on the real page rather
      than trusting this arithmetic. -->
-<div id="note">first touch goes fullscreen · tilt to steer · corners are brake and boost</div>
+<!-- THE GEARS. Two buttons, their own layer, nothing to do with the dev panel
+     that used to hold them. See the #gears rules for why they came back. -->
+<div id="gears">
+  <button id="gUp">GEAR &plus;</button>
+  <button id="gDown">GEAR &minus;</button>
+</div>
+
+<div id="note">tilt to steer · corners are brake and boost · right edge shifts</div>
 
 <!-- THE CONTROLS, IN TWO LAYERS.
      Six buttons a player has a reason to press, then the instruments behind

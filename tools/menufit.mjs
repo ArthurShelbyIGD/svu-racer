@@ -33,6 +33,20 @@ const ok = (cond, label, detail = '') => {
   if (!cond) fails.push(label);
 };
 
+// THE LAST ROW IS A REAL PHONE AND IT IS THE HARDEST CASE THERE IS.
+// Anthony ran the game on his wife's mid-range Samsung, in an in-app browser
+// that refuses fullscreen, and photographed it: canvas 1664x596 at a device
+// pixel ratio of 2.81, which is a 592x212 CSS viewport — a third shorter than
+// anything this rig had ever been pointed at. Android in landscape also puts
+// its gesture bar down the RIGHT-HAND EDGE, over the controls, which is what
+// he actually reported: "the right hand buttons are half covered and extremely
+// difficult to use."
+//
+// `inset` is that system furniture, in CSS px, applied through the same custom
+// properties the stylesheet reads. A headless browser will never report a real
+// safe-area inset, so without this the inset handling could only be inspected,
+// never tested — and CSS that is inspected rather than tested is CSS that was
+// written top-and-bottom-only for months without anyone noticing.
 const SCREENS = [
   { name: "Anthony's phone, fullscreen", w: 720, h: 360 },
   { name: 'his phone, chrome showing', w: 672, h: 280 },
@@ -40,6 +54,9 @@ const SCREENS = [
   { name: 'iPhone, home screen app', w: 844, h: 390 },
   { name: 'iPhone, Safari chrome', w: 844, h: 340 },
   { name: 'Pro Max, home screen app', w: 932, h: 430 },
+  { name: "the Samsung, in-app browser", w: 592, h: 212, inset: { r: 44, l: 0, t: 0, b: 0 } },
+  { name: 'the Samsung, gesture bar left', w: 592, h: 212, inset: { r: 0, l: 44, t: 0, b: 0 } },
+  { name: 'notched iPhone, both sides', w: 844, h: 390, inset: { r: 50, l: 50, t: 0, b: 21 } },
 ];
 
 const b = await chromium.launch({
@@ -56,6 +73,13 @@ for (const s of SCREENS) {
   const p = await b.newPage({ viewport: { width: s.w, height: s.h } });
   await p.goto(FILE, { waitUntil: 'load' });
   await p.waitForFunction(() => window.RACER, null, { timeout: 30000 });
+  if (s.inset) {
+    await p.evaluate((i) => {
+      const r = document.documentElement.style;
+      r.setProperty('--sat', i.t + 'px'); r.setProperty('--sar', i.r + 'px');
+      r.setProperty('--sab', i.b + 'px'); r.setProperty('--sal', i.l + 'px');
+    }, s.inset);
+  }
   await p.waitForTimeout(700);
 
   for (const which of PANELS) {
@@ -71,7 +95,13 @@ for (const s of SCREENS) {
           'Not built yet. Credits earned by racing will buy engines, gearboxes and ' +
           'paint here, and the car will finally be somewhere you can walk round it.';
       }
-      const W = window.innerWidth, H = window.innerHeight;
+      // THE USABLE BOX, NOT THE VIEWPORT. A button inside the window but under
+      // the system's gesture bar is exactly the failure being fixed here, and a
+      // check that only knows about window.innerWidth cannot see it.
+      const cs = getComputedStyle(document.documentElement);
+      const num = (v) => parseFloat(cs.getPropertyValue(v)) || 0;
+      const L = num('--sal'), R = num('--sar'), T = num('--sat'), B = num('--sab');
+      const W = window.innerWidth - R, H = window.innerHeight - B;
       const panel = document.getElementById(id);
       let over = 0, overW = 0, overH = 0, minBtn = 1e9, minName = '';
       const walk = (el) => {
@@ -82,9 +112,9 @@ for (const s of SCREENS) {
         const scroller = el.id === 'sBody' || el.closest('#sBody');
         if (!scroller) {
           if (q.right > W + 0.5) { over++; overW = Math.max(overW, q.right - W); }
-          if (q.left < -0.5) { over++; overW = Math.max(overW, -q.left); }
+          if (q.left < L - 0.5) { over++; overW = Math.max(overW, L - q.left); }
           if (q.bottom > H + 0.5) { over++; overH = Math.max(overH, q.bottom - H); }
-          if (q.top < -0.5) { over++; overH = Math.max(overH, -q.top); }
+          if (q.top < T - 0.5) { over++; overH = Math.max(overH, T - q.top); }
         }
         if (el.tagName === 'BUTTON') {
           const side = Math.min(q.width, q.height);
@@ -92,7 +122,14 @@ for (const s of SCREENS) {
         }
         for (const c of el.children) walk(c);
       };
-      walk(panel);
+      // START AT THE PANEL'S CHILDREN, NOT AT THE PANEL. The panel is a
+      // full-bleed backdrop — `position:absolute; inset:0` — so it covers the
+      // gesture bar BY DESIGN and always will; it is the dark sheet the
+      // content sits on. Counting it as an overflow reported every screen as
+      // broken by exactly the inset, which is the tool describing its own
+      // arithmetic rather than anything about the page. What must clear the
+      // system furniture is the things you read and press.
+      for (const c of panel.children) walk(c);
       return { over, overW, overH, minBtn: minBtn === 1e9 ? null : minBtn, minName,
                pw: panel.getBoundingClientRect().width, ph: panel.getBoundingClientRect().height };
     }, which);
@@ -127,6 +164,86 @@ for (const s of SCREENS) {
   await p.close();
   console.log('');
   ok(caught, 'NEGATIVE CONTROL: a button forced off the screen is seen as off the screen');
+}
+
+// ---------------------------------------------------------------------------
+// 2b: THE GEARS. Both halves of a bug that shipped.
+//
+// The landing page took the on-track control panel away and the gear buttons
+// went with it, because they were sitting in a grid I had filed as "the dev
+// panel". They are the ONLY way to change gear on a phone, so the car was
+// stuck in first: "Major bug with the latest version, how to change gear".
+//
+// And the reason the panel had to go in the first place was the OTHER half:
+// Android in landscape puts its gesture bar down the right-hand edge, straight
+// over buttons pinned to `right: 8px`. "The right hand buttons are half
+// covered and extremely difficult to use... a new player would just close the
+// app and write it off as useless."
+//
+// So both are tested, together, on the phone that found them.
+console.log('\n  THE GEAR BUTTONS\n');
+for (const s2 of SCREENS.filter((x) => x.inset || x.w === 592 || x.w === 720)) {
+  const p = await b.newPage({ viewport: { width: s2.w, height: s2.h } });
+  await p.goto(FILE, { waitUntil: 'load' });
+  await p.waitForFunction(() => window.RACER, null, { timeout: 30000 });
+  await p.evaluate(() => window.RACER.renderer.setPixelRatio(0.4));
+  if (s2.inset) {
+    await p.evaluate((i) => {
+      const r = document.documentElement.style;
+      r.setProperty('--sat', i.t + 'px'); r.setProperty('--sar', i.r + 'px');
+      r.setProperty('--sab', i.b + 'px'); r.setProperty('--sal', i.l + 'px');
+    }, s2.inset);
+  }
+  await p.waitForTimeout(500);
+  await p.click('#mRace');
+  await p.waitForTimeout(400);
+
+  const g = await p.evaluate(() => {
+    const cs = getComputedStyle(document.documentElement);
+    const num = (v) => parseFloat(cs.getPropertyValue(v)) || 0;
+    const L = num('--sal'), R = num('--sar'), T = num('--sat'), B = num('--sab');
+    const W = window.innerWidth, H = window.innerHeight;
+    const out = {};
+    for (const id of ['gUp', 'gDown']) {
+      const el = document.getElementById(id);
+      if (!el) { out[id] = null; continue; }
+      const q = el.getBoundingClientRect();
+      out[id] = { w: q.width, h: q.height,
+                  clear: q.right <= W - R + 0.5 && q.left >= L - 0.5
+                      && q.bottom <= H - B + 0.5 && q.top >= T - 0.5,
+                  // How much room is left between the button and the bar. A
+                  // button that clears it by one pixel clears it by nothing.
+                  gap: (W - R) - q.right };
+    }
+    return out;
+  });
+
+  for (const id of ['gUp', 'gDown']) {
+    const q = g[id];
+    console.log(`  ${s2.name.padEnd(30)} ${id.padEnd(6)} ` +
+                `${q ? `${q.w.toFixed(0)}x${q.h.toFixed(0)}px, ${q.gap.toFixed(0)}px clear of the bar` : 'MISSING'}` +
+                `${q && q.clear ? '' : '   <-- '}`);
+    if (!q) fails.push(`${s2.name}: ${id} does not exist — there is no way to change gear`);
+    else {
+      if (!q.clear) fails.push(`${s2.name}: ${id} is under the system furniture`);
+      if (Math.min(q.w, q.h) < 40) fails.push(`${s2.name}: ${id} is only ${Math.min(q.w, q.h).toFixed(0)}px on its short side`);
+    }
+  }
+
+  // AND THEY HAVE TO SHIFT THE GEARBOX, not just exist in the right place.
+  const shifted = await p.evaluate(async () => {
+    const R = window.RACER;
+    const before = R.st.gear;
+    document.getElementById('gUp').click();
+    document.getElementById('gUp').click();
+    const up = R.st.gear;
+    document.getElementById('gDown').click();
+    return { before, up, down: R.st.gear };
+  });
+  ok(shifted.up > shifted.before && shifted.down < shifted.up,
+     `${s2.name}: the buttons actually change gear`,
+     `${shifted.before} -> ${shifted.up} -> ${shifted.down}`);
+  await p.close();
 }
 
 // ---------------------------------------------------------------------------

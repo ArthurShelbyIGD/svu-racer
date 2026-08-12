@@ -46,6 +46,23 @@ import { CAR_PNG, CITY_PNG } from '../art/menu.js';
 const $ = (id) => document.getElementById(id);
 
 /**
+ * WHAT THIS TRACK IS CALLED, and it is not Night City.
+ *
+ * That was the working name and it had to go: Night City is the setting of
+ * Cyberpunk 2077 and has been since 1988's Cyberpunk 2013. Anthony caught it —
+ * "we can't call it Night City as that is the Cyberpunk 2077 city name" — and
+ * he is right on both counts, the obvious one and the one that matters more:
+ * a game that borrows another game's place name reads as a game that borrowed
+ * other things too, whatever the legal position turns out to be.
+ *
+ * MIDNIGHT MILE is its own name, says what the track is — a long dark run
+ * through a city — and leaves the daytime circuit free to be something else
+ * entirely rather than "Day City". One constant, so renaming it is one edit
+ * and the lap-times panel and the track picker cannot drift apart.
+ */
+export const TRACK_NAME = 'MIDNIGHT MILE';
+
+/**
  * Build the menu's markup once, at boot.
  *
  * IN CODE RATHER THAN IN THE TEMPLATE, unlike the HUD and the control panel.
@@ -76,6 +93,11 @@ function markup() {
       <button class="mB" id="mGarage">GARAGE</button>
       <button class="mB" id="mSettings">SETTINGS</button>
     </div>
+    <!-- ONE LINE, NOT TWO. The best lap and the fullscreen hint are both a
+         single row of small grey text, and stacking them put the front page
+         four pixels over the edge of a 592x212 Samsung — the shortest screen
+         this has ever been run on. Joined with a dot, which is also how the
+         note over the road separates its clauses. -->
     <div id="mBest"></div>
   </div>
 
@@ -176,7 +198,7 @@ export function buildMenu(api) {
   on('mTimes', () => { show('pTimes'); refresh(); });
   on('mSettings', () => { show('pSettings'); refresh(); });
   on('mTracks', () => soon('TRACKS',
-    'One track for now — the night city. A daytime circuit with a blue sky is ' +
+    `One track for now — ${TRACK_NAME}. A daytime circuit with a blue sky is ` +
     'next, and this is where you will pick between them.'));
   on('mGarage', () => soon('GARAGE',
     'Not built yet. Credits earned by racing will buy engines, gearboxes and ' +
@@ -202,6 +224,9 @@ export function buildMenu(api) {
       note: 'Only whole divisions of the screen pace evenly, so these are the only useful values.' },
     { k: 'scenery', kind: 'step', label: 'CITY',
       note: 'How many buildings. The single biggest thing you can turn down.' },
+    { k: 'fullscreen', kind: 'act', label: 'FULLSCREEN', act: 'GO',
+      note: 'Fills the screen and locks landscape. Some in-app browsers refuse it — ' +
+            'if yours does, open the link in Chrome or Safari instead.' },
     { k: 'readout', kind: 'sw', label: 'SHOW THE NUMBERS',
       note: 'Frame rate, draw calls and triangles, over the track. For sending back test data.' },
   ];
@@ -210,20 +235,26 @@ export function buildMenu(api) {
   sBody.innerHTML = ROWS.map((r) => `
     <div class="sRow">
       <div class="sText"><div class="sLabel">${r.label}</div><div class="sNote">${r.note}</div></div>
-      <div class="sCtl">${r.kind === 'sw'
-        ? `<button class="mB sSw" data-k="${r.k}"></button>`
+      <div class="sCtl">${
+        r.kind === 'sw' ? `<button class="mB sSw" data-k="${r.k}"></button>`
+        : r.kind === 'act' ? `<span class="sVal sWide" data-v="${r.k}"></span>` +
+                             `<button class="mB sAct" data-k="${r.k}">${r.act}</button>`
         : `<button class="mB sStep" data-k="${r.k}" data-d="-1">&minus;</button>` +
           `<span class="sVal" data-v="${r.k}"></span>` +
           `<button class="mB sStep" data-k="${r.k}" data-d="1">+</button>`}</div>
     </div>`).join('');
 
-  for (const b of sBody.querySelectorAll('.sSw, .sStep')) {
+  for (const b of sBody.querySelectorAll('.sSw, .sStep, .sAct')) {
     const go = (e) => {
       e.stopPropagation(); e.preventDefault();
       const k = b.dataset.k;
       if (b.classList.contains('sSw')) api.toggle(k);
+      else if (b.classList.contains('sAct')) api.act(k);
       else api.step(k, Number(b.dataset.d));
+      // A BEAT BEFORE READING IT BACK. Fullscreen resolves a promise, so the
+      // state a synchronous refresh sees is the state before the request.
       refresh();
+      setTimeout(refresh, 400);
     };
     b.addEventListener('click', go);
     b.addEventListener('touchstart', go, { passive: false });
@@ -236,14 +267,24 @@ export function buildMenu(api) {
     // The best lap on the front page, because it is the thing the player is
     // actually chasing and it belongs where they can see it before they decide
     // to press RACE.
-    $('mBest').textContent = s.best == null
+    // SAID ON THE FRONT PAGE, not buried in grey text over the road. Anthony:
+    // "full screen happened when I clicked the screen but it needs to be more
+    // obvious." It happens on RACE, which is the right moment — nobody knew it
+    // was going to. And when the browser refuses outright, which is what an
+    // in-app browser does, say THAT instead, because the fix belongs to the
+    // player: open the link somewhere else.
+    const fsBit = s.fsState === 'fullscreen' ? ''
+      : s.fsState === 'unsupported' ? 'this browser will not go fullscreen — open it in Chrome or Safari'
+      : 'RACE fills the screen';
+    const bestBit = s.best == null
       ? 'no time set'
-      : `best lap ${lap(s.best)}   ·   top speed ${Math.round(s.bestTop)} mph`;
+      : `best lap ${lap(s.best)} · top speed ${Math.round(s.bestTop)} mph`;
+    $('mBest').textContent = fsBit ? `${fsBit}  ·  ${bestBit}` : bestBit;
 
     $('tBody').innerHTML = `
       <div class="tRow"><span>FASTEST LAP</span><b>${lap(s.best)}</b></div>
       <div class="tRow"><span>TOP SPEED</span><b>${s.bestTop == null ? '---' : Math.round(s.bestTop) + ' mph'}</b></div>
-      <div class="tRow"><span>THIS TRACK</span><b>NIGHT CITY</b></div>
+      <div class="tRow"><span>THIS TRACK</span><b>${TRACK_NAME}</b></div>
       <p class="tNote">${s.best == null
         ? 'Nothing set yet. The clock starts when the lights go out.'
         : 'Beaten by driving it faster. There is no other way in and no way to clear it from here.'}</p>`;

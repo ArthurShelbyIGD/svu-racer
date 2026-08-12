@@ -60,9 +60,35 @@ came to 4.3K. See `src/art/svu.js`.
 **Still to decide:** blower or scoop. They are the same render with the bonnet
 swapped and crop to the same box, so it is a straight swap either way.
 
+### Fixed the same day, from two phones
+
+- **The gears vanished.** GEAR -/+ were folded into "the dev panel" and taken
+  off the screen with it; they are the only way to shift on a phone, so the car
+  was stuck in first. They are their own layer now, right-hand edge at thumb
+  height, and the up-shift button lights with the tacho's shift lamp off the
+  same condition so the two cannot disagree.
+- **Android's gesture bar sat on the controls.** In landscape it runs down the
+  RIGHT-HAND EDGE, and every layer of UI had safe-area insets on the top and
+  bottom only — invisible in portrait, fatal in landscape. All four edges now
+  go through `--sat/--sar/--sab/--sal`, which exist as custom properties rather
+  than raw `env()` SO THEY CAN BE TESTED: no headless browser reports a real
+  inset, so tools/menufit.mjs overrides them with Android values and re-runs
+  the whole sweep.
+- **592x212.** His wife's Samsung, in an in-app browser that refuses fullscreen
+  outright. A third shorter than anything previously tested, and the front page
+  was four pixels too tall for it. It is in the sweep now.
+- **Fullscreen said out loud.** It happens on RACE, which is the right moment,
+  but nothing said so. The front page says it — and when the browser refuses,
+  which is what an in-app browser does, it says THAT instead, because the fix
+  belongs to the player: open the link in Chrome or Safari.
+
 ## 2. A second track — daytime
 
-Blue sky, sunny. The whole palette so far is a night city, so this is a bigger
+Blue sky, sunny. The night one is called **MIDNIGHT MILE** — `TRACK_NAME` in
+src/ui/menu.js. It was "Night City" for about four hours until Anthony pointed
+out that is Cyberpunk 2077's, and has been since 1988.
+
+ The whole palette so far is a night city, so this is a bigger
 job than "change the sky colour": the ink weights, the fog, the building
 brightness and the headlight-lit tarmac were all tuned against a night
 reference, and half of them will read wrong at noon.

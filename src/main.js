@@ -2385,6 +2385,7 @@ const cockpit = buildCockpit({ pencil: PENCIL, palette: PAL, ink: INK, driverX: 
                                tachoFull: TACHO_FULL });
 
 /** Filled in and handed to the cockpit each frame; never reallocated. */
+let lastWantShift = null;
 const COCKPIT_STATE = { speed: 0, maxSpeed: 0, steer: 0, boosting: false, braking: false,
                         boostLeft: 1, rev: 0, gear: 0, gears: GEARS.length, race: null };
 
@@ -2875,6 +2876,11 @@ function applyFov(hFovDeg) {
   // is the garage's business from here, not a button's.
   bind('bFast', () => { st.gear = clamp(st.gear + 1, 0, GEARS.length - 1); });
   bind('bSlow', () => { st.gear = clamp(st.gear - 1, 0, GEARS.length - 1); });
+  // AND THE REAL ONES, on their own layer. See the #gears note in the shell for
+  // why these exist separately from the panel above: the panel is gone from the
+  // screen and these are how anybody drives.
+  bind('gUp', () => { st.gear = clamp(st.gear + 1, 0, GEARS.length - 1); });
+  bind('gDown', () => { st.gear = clamp(st.gear - 1, 0, GEARS.length - 1); });
 }
 
 function resize() {
@@ -3421,6 +3427,18 @@ function frame(now) {
     return;
   }
 
+  // THE BUTTON LIGHTS UP WITH THE LAMP. The tacho already says "shift now"; a
+  // player who has not yet worked out WHERE to shift gets nothing from it, and
+  // this is the first build where the gear buttons are not sitting in an
+  // obvious grid labelled for them. Same condition the cockpit's lamp uses, so
+  // the two can never disagree — 0.80 of the drawn sweep, and never in top.
+  const wantShift = (0.10 + st.rev * 0.90) >= 0.80 && st.gear < GEARS.length - 1;
+  if (wantShift !== lastWantShift) {
+    lastWantShift = wantShift;
+    const g = document.getElementById('gUp');
+    if (g) g.classList.toggle('want', wantShift);
+  }
+
   cockpit.group.visible = st.view === 1 && tune.showCockpit;
   if (st.view === 1) {
     // Reused, not rebuilt. A fresh object literal here is one allocation per
@@ -3604,6 +3622,13 @@ const menu = buildMenu({
     pixels: DPR_STEPS[dprI].toFixed(2) + 'x',
     cap: DIVISORS[divI] === 1 ? 'none' : Math.round(panelHz / DIVISORS[divI]) + ' fps',
     scenery: scenery.want === 0 ? 'off' : String(scenery.want),
+    // THE WORD THE BROWSER GAVE US, not a guess. goFullscreen writes the
+    // refusal message into fs.state — Anthony's Samsung came back "refused:
+    // Fullscreen is not supported", which is an in-app browser saying no and
+    // is worth telling the player, because the fix is theirs: open it in a
+    // real browser.
+    fsState: /not supported|unsupported/i.test(fs.state) ? 'unsupported' : fs.state,
+    fullscreen: fs.state === 'fullscreen' ? 'on' : /refused/i.test(fs.state) ? 'refused' : 'off',
   }),
   toggle: (k) => {
     if (k === 'sound') audio.setMuted(!audio.muted);
@@ -3611,6 +3636,7 @@ const menu = buildMenu({
     else if (k === 'invert') { tilt.invert = !tilt.invert; recentreTilt(); }
     else if (k === 'readout') { document.body.classList.toggle('lean'); worst = 0; }
   },
+  act: (k) => { if (k === 'fullscreen') { goFullscreen(); keepAwake(); } },
   step: (k, d) => {
     if (k === 'pixels') { dprI = clamp(dprI + d, 0, DPR_STEPS.length - 1); applyDpr(); }
     // CAP + WALKS DOWN THE LIST towards "none", so the button reads the way the

@@ -92,6 +92,14 @@ function markup() {
       <button class="mB" id="mTimes">LAP TIMES</button>
       <button class="mB" id="mGarage">GARAGE</button>
       <button class="mB" id="mSettings">SETTINGS</button>
+      <!-- A BUTTON, NOT A SENTENCE. The first attempt at making fullscreen
+           "more obvious" was a line of grey text saying RACE would do it, and
+           Anthony's reply was exact: "by making full screen more obvious I
+           meant a button on the home screen as there is still no obvious way."
+           He is right — a thing you can press is discoverable and a thing you
+           can read is not. It hides itself once you are fullscreen, and turns
+           into an explanation when the browser refuses. -->
+      <button class="mB" id="mFull">FULL SCREEN</button>
     </div>
     <!-- ONE LINE, NOT TWO. The best lap and the fullscreen hint are both a
          single row of small grey text, and stacking them put the front page
@@ -203,6 +211,7 @@ export function buildMenu(api) {
   on('mGarage', () => soon('GARAGE',
     'Not built yet. Credits earned by racing will buy engines, gearboxes and ' +
     'paint here, and the car will finally be somewhere you can walk round it.'));
+  on('mFull', () => { api.act('fullscreen'); refresh(); setTimeout(refresh, 500); });
   on('rRetry', () => { close(); api.race(); });
   on('rMenu', () => open('pMain'));
 
@@ -273,9 +282,18 @@ export function buildMenu(api) {
     // was going to. And when the browser refuses outright, which is what an
     // in-app browser does, say THAT instead, because the fix belongs to the
     // player: open the link somewhere else.
+    // THE BUTTON GOES WHEN THERE IS NOTHING FOR IT TO DO, and says why when it
+    // cannot work. An in-app browser refuses outright — Anthony's Samsung came
+    // back "Fullscreen is not supported" — and the fix then belongs to the
+    // player rather than to the button.
+    const full = $('mFull');
+    const dead = s.fsState === 'unsupported';
+    full.style.display = s.fsState === 'fullscreen' ? 'none' : '';
+    full.textContent = dead ? 'NO FULL SCREEN' : 'FULL SCREEN';
+    full.classList.toggle('mDead', dead);
     const fsBit = s.fsState === 'fullscreen' ? ''
-      : s.fsState === 'unsupported' ? 'this browser will not go fullscreen — open it in Chrome or Safari'
-      : 'RACE fills the screen';
+      : dead ? 'this browser blocks full screen — open the link in Chrome, or add it to your home screen'
+      : '';
     const bestBit = s.best == null
       ? 'no time set'
       : `best lap ${lap(s.best)} · top speed ${Math.round(s.bestTop)} mph`;

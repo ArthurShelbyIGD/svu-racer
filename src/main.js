@@ -2324,7 +2324,13 @@ function stepRace(dt) {
     }
     return;
   }
-  if (race.state === 'done' && race.t > 6) startRace();
+  // THE SIX-SECOND AUTO-RESTART IS GONE. It was right when finishing a lap
+  // dropped you back on the road with nothing to decide; there is a results
+  // card now with RETRY and MENU on it, and this kept firing underneath it.
+  // Anthony: "When the race ends click the settings button and a new race
+  // starts in the background." He was not starting it — this was, six seconds
+  // after the flag, while he was reading a panel that had taken the decision
+  // away from it.
 }
 
 const scenery = new Scenery(scene, SCENERY_MAX);
@@ -2881,6 +2887,7 @@ function applyFov(hFovDeg) {
   // screen and these are how anybody drives.
   bind('gUp', () => { st.gear = clamp(st.gear + 1, 0, GEARS.length - 1); });
   bind('gDown', () => { st.gear = clamp(st.gear - 1, 0, GEARS.length - 1); });
+  bind('gZero', () => recentreTilt());
 }
 
 function resize() {
@@ -3077,6 +3084,15 @@ function frame(now) {
   // is the decision Anthony asked to be given.
   while (st.gear > 0 && st.speed < top * GEARS[st.gear - 1] * 0.45) st.gear--;
 
+  // SILENT WHILE THE MENU IS UP. The car idles on the grid behind the landing
+  // page, which is a nice first frame and a terrible first NOISE: switching
+  // sound on in Settings started an engine running under a menu, seconds
+  // before anything had been raced. Anthony: "Audio starts before the race
+  // starts when switched on in settings." Ducked rather than muted, because
+  // mute is the player's switch and is remembered across reloads — this is the
+  // game deciding nobody is driving yet, which is a different thing and must
+  // not overwrite their choice.
+  audio.setQuiet(menu.isOpen());
   audio.update(dt, st, race, braking, boosting, tune.maxSpeed);
 
   // Can exceed 1 while boosting, deliberately: the field of view and the camera

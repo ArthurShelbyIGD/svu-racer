@@ -13,7 +13,6 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="screen-orientation" content="landscape">
-<link rel="manifest" href='data:application/manifest+json,{"name":"Racer","short_name":"Racer","display":"fullscreen","orientation":"landscape","background_color":"%230b0d14","theme_color":"%230b0d14","start_url":"."}'>
 <title>Racer</title>
 <style>
   /* ---- THE EDGES OF THE GLASS THAT ARE NOT YOURS ----
@@ -197,11 +196,27 @@
   /* The car overlaps the buttons slightly and sits behind them, which is what
      stops the page reading as a title, a picture and a list stacked in three
      separate bands. */
-  #mCar { width: min(74vmin, 62%); max-height: 27vmin; object-fit: contain;
-          margin: -0.5vmin 0 -2.5vmin 0; filter: drop-shadow(0 1vmin 2vmin #000a); }
+  /* THE CAR GIVES WAY TO THE BUTTONS, and it should. It is the best-looking
+     thing on the page and it is also the only part of it nobody needs: a
+     player who cannot see a button cannot start the game. Every time a control
+     has been added the car has come down to pay for it — 34vmin, then 27, now
+     21 — because the shortest screen this runs on is 212 CSS pixels tall and
+     six buttons plus a title plus a hero image do not fit in it by wishing. */
+  #mCar { width: min(74vmin, 62%); max-height: 21vmin; object-fit: contain;
+          margin: -0.5vmin 0 -2vmin 0; filter: drop-shadow(0 1vmin 2vmin #000a); }
   #mBtns { display: flex; justify-content: center; position: relative; z-index: 2; }
   #mBtns2 { display: flex; flex-wrap: wrap; gap: 1.4vmin; justify-content: center;
-            position: relative; z-index: 2; max-width: 96vmin; margin-top: 1.4vmin; }
+            position: relative; z-index: 2; max-width: 96vmin; margin-top: 1.1vmin; }
+  /* AND ON THE SHORTEST SCREENS IT GOES ALTOGETHER. Below about 240px of
+     height there is no arrangement of a title, a hero car, six buttons and a
+     line of text that fits, and the car is the only one of those four that is
+     not load-bearing. It is a picture of the car you are about to sit in; the
+     game is three seconds away. Everything else on the page is a thing you
+     press or a thing you need to read. */
+  @media (max-height: 245px) {
+    #mCar { display: none; }
+    #mTitle { font-size: 8vmin; margin-bottom: 1vmin; }
+  }
   #mBest { margin-top: 1.2vmin; font-size: max(9px, 2.2vmin); color: #9aa0ad;
            letter-spacing: 0.06em; text-align: center; }
 
@@ -215,6 +230,7 @@
         min-height: max(40px, 8vmin); cursor: pointer;
         -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
   .mB:active { background: #232836; }
+  .mB.mDead { color: #7b8290; border-color: #2a2f3a; }
   .mB.mBig { background: #2f7d1acc; border-color: #8ee23f;
              font-size: max(13px, 3.2vmin); padding-left: max(22px, 5vmin); padding-right: max(22px, 5vmin); }
   .mB.mBig:active { background: #3f9a26; }
@@ -315,6 +331,11 @@
      is telling you to press say it too, because a tell-tale that points at a
      control the player has not found yet is a tell-tale pointing at nothing. */
   #gears button.want { border-color: #8ee23f; background: #2f7d1a55; }
+  /* Set apart from the two gears, and smaller, because it is a rescue rather
+     than something you press every few seconds — but still a full 40px target,
+     because the moment you need it is the moment you are already flustered. */
+  #gZero { margin-top: 6px; font-size: max(9px, 2vmin); min-height: max(40px, 7vmin);
+           opacity: 0.75; }
 </style>
 </head>
 <body class="lean">
@@ -337,9 +358,26 @@
 <div id="gears">
   <button id="gUp">GEAR &plus;</button>
   <button id="gDown">GEAR &minus;</button>
+  <!-- RE-ZERO THE TILT, AND IT HAS TO BE HERE RATHER THAN IN SETTINGS.
+       Tilt steering measures from a neutral captured earlier; hold the phone
+       differently — reaching for a button, shifting in a seat, leaning into a
+       corner — and neutral is wrong, so full lock one way is no longer
+       reachable. The car then will not come back and there is nothing on
+       screen to fix it.
+       CENTRE used to be on the track. I moved it into Settings with the rest
+       of the panel, and Settings cannot be opened while racing, so the one
+       control that rescues a drifted zero became unreachable at exactly the
+       moment you need it. Anthony: "Running off the track on a heavy corner
+       and I couldn't steer back onto it."
+       The steering itself is fine and was measured rather than assumed —
+       tools/recover.mjs holds the car off the road at the sharpest corner on
+       the lap and gets it back in under a second at every speed, with a
+       control that proves it is reading the steering. Which is what pointed
+       at the zero instead. -->
+  <button id="gZero">CENTRE</button>
 </div>
 
-<div id="note">tilt to steer · corners are brake and boost · right edge shifts</div>
+<div id="note">tilt to steer · corners are brake and boost · right edge shifts · CENTRE re-zeros the tilt</div>
 
 <!-- THE CONTROLS, IN TWO LAYERS.
      Six buttons a player has a reason to press, then the instruments behind
@@ -374,6 +412,69 @@
   <button id="bCapDown" class="dev">CAP &minus;</button>
   <button id="bCapUp" class="dev">CAP +</button>
 </div>
+
+<script>
+// ---------------------------------------------------------------------------
+// ADD TO HOME SCREEN, WHICH IS THE ONLY RELIABLE WAY OUT OF AN IN-APP BROWSER.
+//
+// Anthony scanned a QR code from WhatsApp on his wife's Samsung. The QR scanner
+// has its own browser, it refused fullscreen outright, and Android's landscape
+// gesture bar sat on the controls: "these sort of things are what brakes a
+// game." He is right, and the honest answer is that you cannot control which
+// browser your link opens in — QR scanners, Instagram, Facebook and half the
+// messaging apps on a phone all have their own webview, and none of them will
+// go fullscreen.
+//
+// What you CAN do is make the escape hatch work. On Android, "Add to Home
+// Screen" only produces a proper standalone window — no address bar, no
+// gesture-bar collision, launches like an app — if the page has a WEB APP
+// MANIFEST saying so. Without one you get a bookmark that reopens the same
+// browser you were trying to leave. iOS has been covered since the start by
+// apple-mobile-web-app-capable; Android needs this.
+//
+// WHY IT IS BUILT HERE INSTEAD OF BEING A SECOND FILE. The game ships as one
+// HTML file and a manifest would be the first thing to break that. A data: URL
+// keeps it inline — but it has to be BASE64 and it has to be BUILT AT RUNTIME,
+// and both of those were measured rather than assumed:
+//
+//   - Plain (non-base64) data: URLs break twice over. The `#` in a colour is
+//     read as a URL fragment and truncates the JSON mid-string; the quotes
+//     then close the href attribute early. Chrome reported "Line: 1, column:
+//     132, Syntax error." and parsed nothing.
+//   - A STATIC manifest cannot have a working start_url, because a relative
+//     URL has nothing to resolve against inside a data: URL and an absolute
+//     one has to match the document's origin — which is not knowable when the
+//     file is built. Chrome: "property 'start_url' ignored, URL is invalid."
+//
+//   Built from location.href at boot, over http, Chrome parses it with an
+//   EMPTY error list. That is the version that shipped.
+//
+// Skipped on file:// because a local file cannot be installed anyway, and the
+// warnings it would log there are noise in every harness that watches the
+// console.
+(function () {
+  if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
+  try {
+    var base = location.href.split('#')[0].split('?')[0].replace(/[^/]*$/, '');
+    var m = {
+      name: 'SVU Racer', short_name: 'SVU Racer',
+      // FULLSCREEN, NOT STANDALONE. Installed, this is a game and should have
+      // the whole glass; standalone still leaves the status bar. display_override
+      // is the modern spelling and `display` is the fallback for anything that
+      // does not read it — a browser that supports neither lands on standalone,
+      // which is still better than the browser it came from.
+      display_override: ['fullscreen', 'standalone'],
+      display: 'fullscreen', orientation: 'landscape',
+      start_url: base, scope: base,
+      background_color: '#0b0d14', theme_color: '#0b0d14',
+    };
+    var l = document.createElement('link');
+    l.rel = 'manifest';
+    l.href = 'data:application/manifest+json;base64,' + btoa(JSON.stringify(m));
+    document.head.appendChild(l);
+  } catch (e) { /* an uninstallable page is not a broken one */ }
+})();
+</script>
 
 <script>
 // WHAT IS THIS DEVICE, AND DID WE SURVIVE IT? Both answers have to exist BEFORE

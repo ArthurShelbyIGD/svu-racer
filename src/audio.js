@@ -313,7 +313,7 @@ export function createAudio(opts) {
   const api = {
     ctx: null, muted: false, nodes: 0, writes: 0, engine: cfg.engine,
     ENGINES,
-    resume, attach, update, setMuted, setEngine, spectrumOf, crash,
+    resume, attach, update, setMuted, setQuiet, setEngine, spectrumOf, crash,
   };
 
   // Every AudioParam this thing writes per frame, with the last value written,
@@ -354,7 +354,7 @@ export function createAudio(opts) {
     rawSrc.connect(src);
 
     const master = ctx.createGain(); N();
-    master.gain.value = api.muted ? 0 : cfg.volume;
+    master.gain.value = (api.muted || quiet) ? 0 : cfg.volume;
     const limiter = ctx.createWaveShaper(); N();
     limiter.curve = limiterCurve(1025, 0.70);
     limiter.oversample = 'none';          // cheapest, and it barely engages
@@ -516,6 +516,30 @@ export function createAudio(opts) {
    * a limiter curve whose centre sample is exactly 0, gives samples that are
    * bit-for-bit zero. tools/audio.mjs asserts that.
    */
+  /**
+   * QUIET, WHICH IS NOT MUTE.
+   *
+   * Mute is the player's switch: it has a button, it is remembered across
+   * reloads, and nothing but the player may change it. This is the game saying
+   * "nobody is driving right now" — the car idles on the grid behind the
+   * landing page, and an engine running under a menu is a noise nobody asked
+   * for. The two must not share a flag, or opening the menu would silently
+   * turn the player's sound off and leave it off.
+   *
+   * Ramped over 60ms rather than assigned. A gain jumped to zero clicks, and a
+   * click every time a menu opens is worse than the idle it was hiding.
+   */
+  let quiet = false;
+  function setQuiet(q) {
+    q = !!q;
+    if (q === quiet || !g) { quiet = q; return; }
+    quiet = q;
+    const t = g.ctx.currentTime, gain = g.master.gain;
+    gain.cancelScheduledValues(t);
+    gain.setValueAtTime(gain.value, t);
+    gain.linearRampToValueAtTime(api.muted || quiet ? 0 : cfg.volume, t + 0.06);
+  }
+
   function setMuted(m) {
     api.muted = !!m;
     try { localStorage.setItem('svu-racer-mute', api.muted ? '1' : '0'); } catch (e) {}
@@ -523,7 +547,10 @@ export function createAudio(opts) {
     const t = g.ctx.currentTime, p = g.master.gain;
     p.cancelScheduledValues(t);
     p.setValueAtTime(p.value, t);
-    p.linearRampToValueAtTime(api.muted ? 0 : cfg.volume, t + 0.04);
+    // AND `quiet` STILL WINS. Unmuting from Settings while the landing page is
+    // up must not start the engine — the whole point of the two flags being
+    // separate is that either one can hold the sound down on its own.
+    p.linearRampToValueAtTime((api.muted || quiet) ? 0 : cfg.volume, t + 0.04);
     return api;
   }
 

@@ -96,15 +96,25 @@ function markup() {
          — it hides itself once you are fullscreen — and a row that changes
          length is a row that reflows the whole page under you. On RACE's line
          it can appear and vanish without ever moving anything else. -->
-    <div id="mBtns">
+    <!-- SIX BUTTONS, THREE BY THREE, AND THE BLOCK NEVER CHANGES SHAPE.
+         Anthony: "We have six buttons at this stage, two rows, so there should
+         be three buttons in each row... A nice neat and tidy block of buttons
+         beats those screenshots by a mile."
+         The thing that makes it hold is that FULL SCREEN no longer disappears
+         once it has been used — it toggles, so the sixth cell is never empty
+         and nothing below it ever reflows. When the browser refuses fullscreen
+         outright it stays in place too, dimmed and relabelled, because a hole
+         in the grid would be worse than a button that cannot do anything.
+         RACE is the middle of the top row, so it is the centre of the block as
+         well as the centre of the page, and it is marked out by COLOUR rather
+         than by size — a bigger cell would break the rectangle. -->
+    <div id="mGrid">
+      <button class="mB" id="mFull">FULL SCREEN</button>
       <button class="mB mBig" id="mRace">RACE</button>
-      <button class="mB mSide" id="mFull">FULL SCREEN</button>
-    </div>
-    <div id="mBtns2">
+      <button class="mB" id="mSettings">SETTINGS</button>
       <button class="mB" id="mTracks">TRACKS</button>
       <button class="mB" id="mTimes">LAP TIMES</button>
       <button class="mB" id="mGarage">GARAGE</button>
-      <button class="mB" id="mSettings">SETTINGS</button>
     </div>
     <!-- ONE LINE, NOT TWO. The best lap and the fullscreen hint are both a
          single row of small grey text, and stacking them put the front page
@@ -293,8 +303,11 @@ export function buildMenu(api) {
     // player rather than to the button.
     const full = $('mFull');
     const dead = s.fsState === 'unsupported';
-    full.style.display = s.fsState === 'fullscreen' ? 'none' : '';
-    full.textContent = dead ? 'NO FULL SCREEN' : 'FULL SCREEN';
+    // IT STAYS PUT IN ALL THREE STATES. Hiding it left a hole in the grid and
+    // shuffled everything under it; the only version of this that holds the
+    // block together is one where the cell is always occupied.
+    full.textContent = dead ? 'NO FULL SCREEN'
+      : s.fsState === 'fullscreen' ? 'EXIT FULL' : 'FULL SCREEN';
     full.classList.toggle('mDead', dead);
     const fsBit = s.fsState === 'fullscreen' ? ''
       : dead ? 'this browser blocks full screen — open the link in Chrome, or add it to your home screen'

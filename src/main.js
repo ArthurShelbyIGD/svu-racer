@@ -2547,6 +2547,26 @@ function goFullscreen() {
   } catch (e) { fs.state = why2(e); }
 }
 
+/**
+ * OUT AGAIN, so the button always has a job.
+ *
+ * Anthony wanted the fullscreen button to PERSIST rather than vanish once it
+ * had been used — "the best thing, that would look the neatest, would be for
+ * the full screen button to persist so we still have six buttons spread over
+ * two rows" — and a button that stays on screen doing nothing is worse than
+ * one that leaves. So it toggles. Going out is also the only way back to the
+ * address bar on a phone with no visible browser chrome, which players
+ * occasionally want and previously had to find a gesture for.
+ */
+function leaveFullscreen() {
+  const ex = document.exitFullscreen || document.webkitExitFullscreen;
+  if (!ex) return;
+  try {
+    const p = ex.call(document);
+    if (p && p.catch) p.catch(() => {});
+  } catch (e) { /* already out, or refused; onFsChange has the truth either way */ }
+}
+
 const onFsChange = () => {
   const on = !!(document.fullscreenElement || document.webkitFullscreenElement);
   fs.state = on ? 'fullscreen' : 'windowed';
@@ -3652,7 +3672,12 @@ const menu = buildMenu({
     else if (k === 'invert') { tilt.invert = !tilt.invert; recentreTilt(); }
     else if (k === 'readout') { document.body.classList.toggle('lean'); worst = 0; }
   },
-  act: (k) => { if (k === 'fullscreen') { goFullscreen(); keepAwake(); } },
+  act: (k) => {
+    if (k !== 'fullscreen') return;
+    // A TOGGLE, not a one-way door. See leaveFullscreen for why.
+    if (fs.state === 'fullscreen') leaveFullscreen();
+    else { goFullscreen(); keepAwake(); }
+  },
   step: (k, d) => {
     if (k === 'pixels') { dprI = clamp(dprI + d, 0, DPR_STEPS.length - 1); applyDpr(); }
     // CAP + WALKS DOWN THE LIST towards "none", so the button reads the way the

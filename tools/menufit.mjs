@@ -167,6 +167,77 @@ for (const s of SCREENS) {
 }
 
 // ---------------------------------------------------------------------------
+// 2a: THE BUTTON BLOCK. Three by three, the same in every state, RACE centred.
+//
+// Anthony asked for "a nice neat and tidy block of buttons", and the thing
+// that makes a block a block is that it does not change shape. FULL SCREEN is
+// the only button here whose label and state move — it reads FULL SCREEN, then
+// EXIT FULL once you are in, and NO FULL SCREEN when the browser refuses — so
+// it is the one that can wreck the grid, and it has wrecked it twice already:
+// once by hiding itself and leaving a hole, once by sitting in a centred flex
+// row that re-centred around it and shifted RACE off the middle of the page.
+//
+// Both of those looked fine in a screenshot. The second one I actually WROTE A
+// COMMENT claiming could not happen, and only caught it by drawing a line down
+// the middle of the picture. So it is measured now: same grid, same cell sizes,
+// RACE on the centre line, in all three fullscreen states.
+console.log('\n  THE BUTTON BLOCK\n');
+// EVERY STATE ON THE TWO SCREENS THAT DISAGREE MOST: the one this was designed
+// on, and the 592x212 Samsung where vmin means something completely different.
+const BLOCK_ON = [{ w: 720, h: 360 }, { w: 592, h: 212 }];
+for (const scr of BLOCK_ON)
+for (const st of ['windowed', 'fullscreen', 'refused: Fullscreen is not supported']) {
+  const p = await b.newPage({ viewport: { width: scr.w, height: scr.h } });
+  await p.goto(FILE, { waitUntil: 'load' });
+  await p.waitForFunction(() => window.RACER, null, { timeout: 30000 });
+  await p.evaluate((x) => { window.RACER.fs.state = x; window.RACER.menu.open('pMain'); }, st);
+  await p.waitForTimeout(400);
+  const g = await p.evaluate(() => {
+    const grid = document.getElementById('mGrid');
+    const bs = [...grid.querySelectorAll('button')];
+    const rects = bs.map((el) => el.getBoundingClientRect());
+    const tops = [...new Set(rects.map((r) => Math.round(r.top)))].sort((a, c) => a - c);
+    const perRow = tops.map((t) => rects.filter((r) => Math.round(r.top) === t).length);
+    const race = document.getElementById('mRace').getBoundingClientRect();
+    const w = [...new Set(rects.map((r) => Math.round(r.width)))];
+    const h = [...new Set(rects.map((r) => Math.round(r.height)))];
+    const car = document.getElementById('mCar').getBoundingClientRect();
+    // DOES EVERY LABEL FIT ITS OWN CELL. nowrap plus forced-equal columns means
+    // a label that is too long does not wrap and does not widen its column —
+    // it just runs out of the button and over its neighbour, which is what
+    // happened the moment the columns were made equal.
+    const spill = bs.filter((el) => el.scrollWidth > el.clientWidth + 1)
+                    .map((el) => `${el.textContent.trim()} by ${el.scrollWidth - el.clientWidth}px`);
+    return { count: bs.length, rows: tops.length, perRow,
+             widths: w, heights: h,
+             raceOff: (race.left + race.right) / 2 - window.innerWidth / 2,
+             carGap: rects.length ? Math.min(...rects.map((r) => r.top)) - car.bottom : 0,
+             spill, label: document.getElementById('mFull').textContent };
+  });
+  await p.close();
+  const tag = `${scr.w}x${scr.h} ${st.split(':')[0]}`;
+  console.log(`  ${tag.padEnd(24)} ${g.count} buttons, ${g.rows} rows of ${g.perRow.join('+')}, ` +
+              `cells ${g.widths.join('/')}x${g.heights.join('/')}px, ` +
+              `RACE off centre by ${g.raceOff.toFixed(1)}px, ${g.carGap.toFixed(0)}px under the car  ("${g.label}")`);
+  ok(g.count === 6 && g.rows === 2 && g.perRow.every((n) => n === 3),
+     `${tag}: six buttons in two rows of three`, `${g.perRow.join('+')}`);
+  ok(g.widths.length === 1 && g.heights.length === 1,
+     `${tag}: every cell the same size, so it reads as one block`,
+     `${g.widths.length} widths, ${g.heights.length} heights`);
+  ok(Math.abs(g.raceOff) < 1.5,
+     `${tag}: RACE is on the centre line`, `${g.raceOff.toFixed(1)}px off`);
+  // 14px, not "some". Anthony asked for "a few more px between the top row of
+  // buttons and the bottom of the car" when it was 9, and a gap nobody has put
+  // a number on is a gap the next layout change quietly eats.
+  ok(g.spill.length === 0,
+     `${tag}: every label fits inside its own button`,
+     g.spill.join(', ') || 'nothing overflows');
+  ok(g.carGap >= 14,
+     `${tag}: there is daylight between the car and the buttons`,
+     `${g.carGap.toFixed(0)}px`);
+}
+
+// ---------------------------------------------------------------------------
 // 2b: THE GEARS. Both halves of a bug that shipped.
 //
 // The landing page took the on-track control panel away and the gear buttons

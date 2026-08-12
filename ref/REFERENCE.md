@@ -335,3 +335,51 @@ budget it spends is download size. 704px of cityscape plus 512px of car is
 about 133K on a 598K game: a 22% heavier download for the first thing anyone
 ever sees. That is probably worth it, but it is a decision and not a detail,
 and it is Anthony's to make.
+
+
+---
+
+# The side view (13 August 2026) — the reference set is complete
+
+`ref/side-nobg.png`, master at `Downloads/svu-racer-images/side-view.png`
+(1407x768). Dead side-on, no perspective, no drop shadow, clean alpha, wheels
+straight, and the car fills 1239 x 382 of the frame — 88% of its width, against
+the rear view's 234 x 176 in an image of the same size. Everything asked for.
+
+## WHAT IT IS FOR, AND WHY IT MATTERS MORE THAN THE OTHER TWO
+
+Third person was shelved in July because the car did not resemble the drawing —
+*"the way it is now it's not worth keeping"* — and the specific fault was
+PROPORTION. The silhouette rig then found the body 60% too wide, but only after
+Anthony hand-cut a reference, because the tool's own ceiling was 82-84% and
+nobody knew whether the missing 16% was the model or the measurement. It was
+the measurement: cast shadows are black and indistinguishable from ink.
+
+A three-quarter view cannot settle proportion. Length and overhang are
+foreshortened by an unknown amount, so a model can be wrong in a way the
+comparison cannot see. This one can:
+
+    overall length : height    3.243
+
+That single number is a hard target the garage car has to hit, and it is
+measurable off the alpha channel with no judgement involved. Wheelbase, the
+ratio of glasshouse to body, and where the wheel centres sit along the length
+are all extractable the same way when the modelling starts.
+
+## THE BLOWER IS NOT IN THIS PICTURE, AND THAT IS RIGHT
+
+The hero on the landing page has a supercharger through the bonnet; the side
+and rear references do not. Anthony spotted the gap and worried about it — and
+it is better than it looks. THE FRONT PAGE IS SHOWING THE FULLY-UPGRADED CAR.
+The garage starts you with the base car in these two references and the blower
+is something you buy, at which point your car becomes the one on the poster.
+That is a progression rather than an inconsistency, and it costs nothing to
+keep.
+
+On how it gets added, his question was whether it needs a second model or can
+be laid on top. Neither, quite: everything here is GENERATED IN CODE, so the
+blower is a parameter on the same builder — `buildBody({ blower: true })` adds
+its geometry (and the hole in the bonnet it sits in) into the same merged mesh,
+at build time. One model, one draw call, no second thing to keep in sync when
+the body changes. Every garage part should work this way; a variant model is
+how two cars slowly stop being the same car.

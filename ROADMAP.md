@@ -82,7 +82,37 @@ swapped and crop to the same box, so it is a straight swap either way.
   which is what an in-app browser does, it says THAT instead, because the fix
   belongs to the player: open the link in Chrome or Safari.
 
-## 2. A second track — daytime
+## 2. A second track — WASTELAND (next up)
+
+Anthony's call after the landing page landed, and his reasoning: a second track
+"is what will make it the most interesting". A number of jumps, scrap and junk
+lying about — and BEATEN-UP CONCRETE rather than dirt, which was his own
+revision and a good one: "we can do a dirt track another time."
+
+That change is worth more than it sounds. A dirt surface would have meant
+re-tuning grip, the off-road penalty and the tyre noise from scratch, because
+all three are built around tarmac being the good surface and the verge being
+the punishment — and on a dirt track there is no road to leave. Cracked
+concrete is still a hard surface with a hard edge, so the whole handling model
+carries over and the work becomes what it should be: geometry, colour and junk.
+
+**The jumps are nearly free and that is worth knowing before scoping it.** The
+broken bridge did not add a special case — main.js launches the car whenever
+the road falls away faster than gravity can hold it, which is general physics,
+substepped below the size of a segment so a slow phone cannot step over a crest.
+Any ramp shaped into `track.hill` becomes a jump automatically. See the note by
+GRAVITY and the three wrong versions of that test recorded above it.
+
+What is genuinely new:
+
+- **Scrap and junk.** The scenery system draws a city from a hash; junk wants
+  the same treatment rather than placed objects, or it costs draw calls.
+- **The daytime question is still open.** A wasteland reads naturally as
+  daylight, which merges this with the "blue sky" job below — but every ink
+  weight, the fog and the building brightness were tuned against a night
+  reference. Worth deciding deliberately rather than by accident.
+
+## 3. A daytime track — blue sky
 
 Blue sky, sunny. The night one is called **MIDNIGHT MILE** — `TRACK_NAME` in
 src/ui/menu.js. It was "Night City" for about four hours until Anthony pointed
@@ -97,7 +127,7 @@ Worth doing before the garage, on Anthony's call, because a second track is what
 turns "a track" into "a game" — and it is the thing that forces the per-track
 lap times below.
 
-## 3. Points and credits
+## 4. Points and credits
 
 Earned by playing, in readiness for the garage. Bonuses for:
 
@@ -108,9 +138,35 @@ Deliberately built BEFORE the garage so that by the time there is something to
 spend credits on there is already a balance to spend, rather than a shop that
 opens with an empty wallet and no way to fill it.
 
-## 4. The garage
+## 5. The garage
 
-The big one, and the reason for points. Also the eventual home of the exterior
+The big one, and the reason for points. Anthony's sequencing, which is the
+right way round: **get the car model right first, as close to the hero image as
+possible, and third person comes back on the strength of it.** Not before.
+
+THE REFERENCE SET IS COMPLETE as of 13 August: rear, angled three-quarter, and
+now a straight side view (`ref/side-nobg.png`) that is everything it needed to
+be — dead side-on, no drop shadow, clean alpha, car filling 88% of the frame.
+It gives the target the three-quarter view never could: **overall length to
+height, 3.243.** See the foot of `ref/REFERENCE.md`, including why the blower
+being absent from the references is a feature rather than a gap.
+
+For the record, what made that image usable, since more will be needed:
+
+- **Dead side-on, no perspective.** A three-quarter view cannot settle a
+  wheelbase or an overhang, because both are foreshortened by an unknown
+  amount. The side view is the one that fixes proportion, which is the thing
+  the shelved third-person car got wrong.
+- **The car filling the frame.** `ref/rear-nobg.png` is 1408x768 with the car
+  occupying 234x176 of it — the rest is empty. Matching a model against 234
+  pixels of reference is matching it against not very much.
+- **No drop shadow, transparent background.** This is the one that has actually
+  cost time. Cast shadows are black and indistinguishable from ink, and they
+  put a hard ceiling of 82-84% on the silhouette score — unreachable, and it
+  took Anthony hand-cutting a version to discover the ceiling was the
+  measurement rather than the model. A clean alpha channel gives a real 100%.
+- **Wheels straight, same car.** Lime green, purple stripes, blower through the
+  bonnet, so the garage car and the hero on the front page are the same object. Also the eventual home of the exterior
 car: third person was shelved in July because the car did not resemble the
 reference from behind — *"the way it is now it's not worth keeping"* — and the
 agreed plan was that the exterior's next home is a garage where it is STATIC and

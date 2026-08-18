@@ -239,6 +239,9 @@ export function buildMenu(api) {
     { k: 'sound', kind: 'sw', label: 'SOUND',
       note: 'The engine, the tyres and the countdown.' },
     { k: 'tilt', kind: 'sw', label: 'TILT STEERING',
+      // REWRITTEN AT RUNTIME ON AN IPHONE. See TILT_NOTE below — iOS is the one
+      // platform where turning this on can silently fail, and the player is the
+      // only person who can fix it.
       note: 'Turn the phone to steer. Off means the screen halves steer instead.' },
     { k: 'invert', kind: 'sw', label: 'INVERT TILT',
       note: 'For holding the phone the other way up.' },
@@ -258,7 +261,7 @@ export function buildMenu(api) {
   const sBody = $('sBody');
   sBody.innerHTML = ROWS.map((r) => `
     <div class="sRow">
-      <div class="sText"><div class="sLabel">${r.label}</div><div class="sNote">${r.note}</div></div>
+      <div class="sText"><div class="sLabel">${r.label}</div><div class="sNote" data-n="${r.k}">${r.note}</div></div>
       <div class="sCtl">${
         r.kind === 'sw' ? `<button class="mB sSw" data-k="${r.k}"></button>`
         : r.kind === 'act' ? `<span class="sVal sWide" data-v="${r.k}"></span>` +
@@ -284,9 +287,53 @@ export function buildMenu(api) {
     b.addEventListener('touchstart', go, { passive: false });
   }
 
+  /**
+   * WHAT THE TILT SWITCH SAYS, WHICH ON AN IPHONE IS NOT ALWAYS "ON".
+   *
+   * iOS is the only platform where switching this on can do nothing and give
+   * no sign of it, and there are three quite different reasons — one of which
+   * the game cannot fix and the player can. Anthony's daughter's iPhone showed
+   * no prompt at all and the reasonable conclusion was that the game does not
+   * work on iPhone; it took reading the code to find that two of the three
+   * were our bugs and the third was never explained to anybody.
+   *
+   * So the switch explains itself, in the same spirit as the fullscreen
+   * refusal text: the browser's own answer, and whose move it is next.
+   */
+  const TILT_NOTE = {
+    granted: 'Turn the phone to steer. Off means the screen halves steer instead.',
+    // Retryable, and switching the row off and on again is the retry — which
+    // is the first thing anybody tries anyway, and now actually does something.
+    blocked: 'iPhone did not offer the motion prompt. Switch this off and on ' +
+             'again to ask, and tap ALLOW.',
+    // The dead end. Safari keeps a refusal on file per site and will never show
+    // the dialog again, so nothing in the game can recover this.
+    denied:  'iPhone has motion access blocked for this site. iOS Settings > ' +
+             'Apps > Safari > Advanced > Website Data, delete this site, then ' +
+             'reload and tap ALLOW.',
+    unasked: 'Turn the phone to steer. Tap ALLOW when iPhone asks for motion access.',
+  };
+
   // ---- what the panels say -----------------------------------------------
   function refresh() {
     const s = api.read();
+    // Only on a device that has to ask. Everywhere else s.tiltPerm is 'n/a' and
+    // the row keeps its plain description — an Android player should never read
+    // a word about iOS permissions.
+    // ALWAYS ASSIGNED, NEVER LEFT ALONE. The first version only wrote the note
+    // when there was an iOS message to write, which left whatever was there
+    // last time — and the boot state is 'unasked', whose text says "Tap ALLOW
+    // when iPhone asks". So an Android player who opened Settings before the
+    // first tap kept that line forever, on a phone with no such prompt. Caught
+    // by the negative control in tools/tiltperm.mjs, which is the only case in
+    // that harness with no iPhone in it.
+    const tn = sBody.querySelector('.sNote[data-n="tilt"]');
+    if (tn) {
+      tn.textContent = TILT_NOTE[s.tiltPerm] || TILT_NOTE.granted;
+      // Marked so it reads as a thing needing attention rather than as part of
+      // the furniture. Only when there is something for the player to do.
+      tn.classList.toggle('sWarn', s.tiltPerm === 'denied' || s.tiltPerm === 'blocked');
+    }
 
     // The best lap on the front page, because it is the thing the player is
     // actually chasing and it belongs where they can see it before they decide

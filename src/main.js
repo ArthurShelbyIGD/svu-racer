@@ -35,6 +35,7 @@ import { buildBody } from './car/body.js';
 import { buildFurniture } from './world/furniture.js';
 import { buildBarrier } from './world/barrier.js';
 import { buildTunnel } from './world/tunnel.js';
+import { themeColours, themeName, cityTint, tileTint, flankShade, skyStops, cityInk } from './art/theme.js';
 import { BRIDGE, shapeBridge, inGap, lipDist, gapWidth } from './world/bridge.js';
 import { buildGantry } from './world/gantry.js';
 // PEDAL_TOP and PEDAL_W come from the cockpit because the cockpit DRAWS the
@@ -164,7 +165,27 @@ const tune = { si: 3, maxSpeed: SPEED_STEPS[3], driverX: 0, pitch: 1,
                // null to let the nitrous drain and refill normally; a number
                // 0..1 pins the bottle, for photographing the gauge at a known
                // reading or for a rig that needs boost to last the whole run.
-               holdBoost: null };   // swept against ref/target-high.png  // driverX set below; pitch is 0..1 so the fix can be A/B measured
+               holdBoost: null,
+               // NULL TO DRIVE NORMALLY; A NUMBER PINS THE SPEED, AND `0` IS
+               // WHY THIS EXISTS.
+               //
+               // `freeze` stops the whole simulation, which is right for
+               // photographing a single instant but wrong for POSING the car:
+               // it also stops the slope lerp and the camera settling, so a
+               // harness that jumps st.dist and freezes gets a camera still
+               // pointing where the car used to be.
+               //
+               // Setting st.speed = 0 from outside does not work either — the
+               // frame loop accelerates away from it before the next capture,
+               // by an amount that depends on how many frames happened to fit
+               // in the harness's timeout. tools/nightsame.mjs measured two
+               // loads of the SAME build differing over a third of the screen
+               // that way, and read it as a colour regression.
+               //
+               // So: holdSpeed = 0 leaves the world running and converging
+               // while the car stays exactly where it was put. Applied inside
+               // the loop for the same reason holdX is.
+               holdSpeed: null };   // swept against ref/target-high.png  // driverX set below; pitch is 0..1 so the fix can be A/B measured
 
 /** Multiplies the displayed number only. The physics is in world units; this
  *  is so the readout says something a driver recognises. Anthony is in the UK
@@ -470,6 +491,19 @@ const PAL = {
   window: 0xffe0a0,
   wall:   0x344250,        // measured: the building faces in the reference
 };
+
+// THE TIME OF DAY, MERGED IN BEFORE ANYTHING IS BUILT.
+//
+// Every world module bakes its colours into a vertex buffer at construction —
+// seven thousand buildings, the barrier, the tunnel, the cockpit atlas — so
+// the palette has to be final before the first of them is made. This line is
+// that moment, and it is why the theme is a boot-time choice rather than a
+// setting: swapping it later would recolour nothing and look like a bug.
+//
+// Night is the default and stays the shipped look. `?theme=golden` is the
+// spike that answers whether the comic-book style survives daylight, on the
+// track that already exists, before the Docks commits five miles to it.
+Object.assign(PAL, themeColours());
 
 // ------------------------------------------------------------------ helpers
 
@@ -929,7 +963,10 @@ class Posts {
  * toon.js's 0x0a0a10, one step bluer because the city is further away and sits
  * in more haze.
  */
-const CITY_INK = 0x0d1119;
+// AND IT IS A THEME VALUE, because it is the one thing in the frame that must
+// never be left over from the wrong time of day. Found by the positive control
+// in tools/nightsame.mjs rather than by eye — see the note in theme.js.
+const CITY_INK = cityInk();
 
 /**
  * WHAT YOU SEE THROUGH THE BROKEN BRIDGE. Darker than the city ink and a touch
@@ -1146,19 +1183,27 @@ function windowTexture(size = 256, seed = 0xbeef) {
   let sd = seed >>> 0;
   const rnd = () => { sd ^= sd << 13; sd >>>= 0; sd ^= sd >> 17; sd ^= sd << 5; sd >>>= 0; return sd / 4294967296; };
 
-  const INKC = '#0b0f16';
+  // THE TILE'S COLOURS COME FROM THE THEME NOW. They were literals here, and
+  // the daylight spike found out why that was a problem the second time in one
+  // afternoon: fixing the instance tint turned the DISTANT city sandy and left
+  // every near building slate blue, because up close the tile's own concrete
+  // is most of what you are looking at. A building's colour is the instance
+  // tint TIMES the face shade TIMES this texel, and a theme that reaches only
+  // one of the three reaches almost nothing. Night values are unchanged.
+  const T = tileTint();
+  const INKC = T.ink;
   // THE CONCRETE IS A STOP AND A HALF DARKER THAN IT WAS. It was #93aec9, and
   // multiplied by a mid instance tint that landed a near facade at luminance
   // 79 against the drawing's measured #344250 at 56. Every other fault in the
   // near field was being read through a wall that was too pale to be night.
-  const PIER = '#8ea6bf';
+  const PIER = T.pier;
   // The spandrel under a window row: DARKER than the concrete, where it used to
   // be lighter. See the header — this is the band that turns a row of separate
   // windows into one horizontal mass the width of the building.
-  const SLAB = '#66768c';
+  const SLAB = T.slab;
   // What catches the light: the cornice lip and the sills. The one pale tone on
   // the facade, and it is a LINE, never an area.
-  const LIP  = '#a9bccd';
+  const LIP  = T.lip;
   // UNLIT GLASS IS NOT BLACK, AND GETTING THAT WRONG COST THE NEAR FIELD ITS
   // FINE STROKES.
   //
@@ -1172,7 +1217,7 @@ function windowTexture(size = 256, seed = 0xbeef) {
   // The tone has to be this high because the map is MULTIPLIED by an instance
   // tint of about 0.25 linear, so a texel has to sit near 0.12 linear to come
   // out of the far end at the luminance-50 glass the reference draws.
-  const GLASS = '#5a6b80';
+  const GLASS = T.glass;
 
   x.fillStyle = PIER;
   x.fillRect(0, 0, size, size);
@@ -1196,7 +1241,7 @@ function windowTexture(size = 256, seed = 0xbeef) {
   let y = B;
   band(y, capH, INKC); y += capH;
   band(y, lipH, LIP);  y += lipH;
-  band(y, shdH, '#242c37'); y += shdH;
+  band(y, shdH, T.shadow); y += shdH;
   const floorTop = y;
   const floorBot = size - B - plinthH;
   band(floorBot, plinthH, INKC);
@@ -1275,9 +1320,24 @@ function windowTexture(size = 256, seed = 0xbeef) {
     for (let cx = 0; cx < COLS; cx++) {
       const wx = Math.round(B + cx * cw + (cw - ww) * 0.5);
       for (let pane = 0; pane < 2; pane++) {
+        // AND AT GOLDEN HOUR THESE ARE NOT LIT ROOMS, THEY ARE REFLECTIONS.
+        // Same mechanism, different meaning: rarer, hotter and whiter, because
+        // what makes a pane stand out in daylight is catching the low sun
+        // rather than having someone's lamp on behind it. Both rate and
+        // colours come from the theme; the night numbers are unchanged.
         const lit = rnd();
-        if (lit < 0.89) continue;
-        x.fillStyle = lit < 0.96 ? '#ffe0a0' : lit < 0.985 ? '#cfe0f2' : '#ffbf7a';
+        if (lit < 1 - T.litChance) continue;
+        // Re-normalised onto 0..1 within the lit band so the three-way split
+        // stays the same proportions whatever the rate is. It used to be three
+        // absolute thresholds against 0.89, which silently changed the MIX as
+        // well as the rate the moment the rate moved.
+        // The two fractions are the night thresholds 0.96 and 0.985 expressed
+        // against the night rate, so night comes out BIT-IDENTICAL. That is not
+        // fussiness: Anthony has called the night track finished, and a
+        // refactor that quietly moves one window in a thousand is exactly the
+        // kind of change that gets blamed on something else three weeks later.
+        const k = (lit - (1 - T.litChance)) / T.litChance;
+        x.fillStyle = k < 0.6363636 ? T.hot : k < 0.8636364 ? T.cool : T.warm;
         const px0 = wx + hair + pane * (gw + hair);
         x.fillRect(px0, wy + hair, gw, trY - hair);
         if (rnd() >= 0.34) x.fillRect(px0, wy + trY + hair, gw, wh - trY - 2 * hair);
@@ -1415,7 +1475,12 @@ class Scenery {
     // lit pane still comes out around sRGB 124 and reads as lit. At 0.10 it
     // does not.
     const LIT = [1, 1, 1];
-    const FLANK = [0.30, 0.32, 0.39];
+    // THE FLANK IS THE SUN DIRECTION, and it is the only place the sun exists
+    // in a renderer with no lights. Night: 0.30, an unlit side of a building.
+    // Golden: much brighter and relatively cooler, because the shaded side is
+    // still lit by the sky. See the note in theme.js about why the shading
+    // says the sun is behind you while the glare will say it is in front.
+    const FLANK = flankShade();
 
     // The faces that can be seen. Canonical space puts the road at -X, so `nx`
     // is the flank facing the street; instances on the other side of the road
@@ -1536,7 +1601,8 @@ class Scenery {
         // of on a lucky hash, and it is the single biggest contributor to the
         // long runs the near field was missing.
         const h = (i * 0.113) % 1;
-        this.c.setHSL(0.60 + h * 0.10, 0.30, 0.085 + ((i * 11) % 3) * 0.022);
+        const T = cityTint();
+        this.c.setHSL(T.darkHue + h * 0.10, 0.30, T.darkLight + ((i * 11) % 3) * 0.022);
       } else {
         // Buildings: cool, dark, and varied enough that the eye does not
         // notice the same box repeating. The window texture supplies the
@@ -1550,9 +1616,14 @@ class Scenery {
         // single block. The mean comes DOWN as well as spreading: the target
         // frame's building faces measure #344250, luminance 56, and ours
         // measured 79.
+        // THE NUMBERS COME FROM THE THEME. They used to be literals here, and
+        // the daylight spike found out the hard way: overriding the palette
+        // changed the sky and left the city exactly as dark as it was at
+        // night. PAL.wall was never what coloured a building.
         const h = (i * 0.113) % 1;
-        this.c.setHSL(0.56 + h * 0.18, 0.16 + ((i * 5) % 4) * 0.05,
-                      0.34 + ((i * 7) % 8) * 0.040);
+        const T = cityTint();
+        this.c.setHSL(T.hue + h * T.hueSpread, T.sat + ((i * 5) % 4) * 0.05,
+                      T.light + ((i * 7) % 8) * T.lightSpread);
       }
       col[i * 3] = this.c.r; col[i * 3 + 1] = this.c.g; col[i * 3 + 2] = this.c.b;
     }
@@ -2016,11 +2087,18 @@ function skyTexture() {
   const x = c.getContext('2d');
   const grd = x.createLinearGradient(0, 0, 0, 64);
   const hex = (n) => '#' + n.toString(16).padStart(6, '0');
-  grd.addColorStop(0.00, hex(PAL.skyTop));
-  grd.addColorStop(0.40, hex(PAL.skyMid));
-  grd.addColorStop(0.72, hex(PAL.skyLow));
-  grd.addColorStop(0.92, hex(PAL.skyGlow));
-  grd.addColorStop(1.00, hex(PAL.haze));
+  // THE STOP POSITIONS ARE A THEME VALUE, and finding out why is the most
+  // useful thing the daylight spike has done. This gradient is stretched over
+  // the SCREEN, so a stop is a screen height, and sampling a sky column shows
+  // the visible sky ends at v=0.35 — the road and the cockpit have the rest.
+  // The last three stops here have therefore never been drawn, at any time, in
+  // either theme. See src/art/theme.js.
+  const S = skyStops();
+  grd.addColorStop(S[0], hex(PAL.skyTop));
+  grd.addColorStop(S[1], hex(PAL.skyMid));
+  grd.addColorStop(S[2], hex(PAL.skyLow));
+  grd.addColorStop(S[3], hex(PAL.skyGlow));
+  grd.addColorStop(S[4], hex(PAL.haze));
   x.fillStyle = grd;
   x.fillRect(0, 0, 2, 64);
   const t = new CanvasTexture(c);
@@ -2609,6 +2687,25 @@ const tilt = {
   // player who would rather use their thumbs, or who is lying on a sofa, now
   // has a switch, and it gates the latch rather than fighting it.
   enabled: true,
+  // WHAT iOS SAID WHEN WE ASKED, IN ITS OWN WORDS.
+  //
+  // This exists because "no prompt appeared" was, until now, unclassifiable
+  // from here — and it is exactly the sort of thing that gets read as "the
+  // game does not work on iPhone" when it is really one of four very different
+  // situations with three different fixes:
+  //
+  //   'n/a'      not an iOS device; readings arrive without asking
+  //   'unasked'  iOS, and we have not managed to ask yet
+  //   'blocked'  the call threw NotAllowedError — no transient activation.
+  //              OUR bug, and retryable on the next real tap.
+  //   'denied'   iOS asked the player, or remembers a previous refusal, and
+  //              said no. NOT retryable: Safari will never show the dialog
+  //              again until website data for the site is cleared.
+  //   'granted'  working.
+  //
+  // The same reasoning as fs.state, which exists because Anthony's Samsung
+  // refused fullscreen and only the browser's own words explained why.
+  perm: 'unasked',
   axis: '-',          // which axis is being read, for the readout
   angle: 0,           // screen orientation, for the readout
 };
@@ -2663,16 +2760,65 @@ function recentreTilt() { tilt.zero = tilt.raw; tilt.out = 0; }
 
 window.addEventListener('deviceorientation', onTilt, true);
 
-// iOS will not send readings at all until asked, and will only ask from
-// inside a real user gesture. Android just works. Asking on the first tap
-// costs nothing on a device that does not need it.
+/**
+ * ASK iOS FOR THE MOTION SENSOR, AND RECORD WHAT IT SAID.
+ *
+ * iOS will not send readings at all until asked, and will only ask from inside
+ * a real user gesture. Android just works, so asking costs nothing there.
+ *
+ * ===========================================================================
+ * THE TWO BUGS THIS HAD, WHICH TOGETHER MADE TILT UNREACHABLE ON AN IPHONE
+ * ===========================================================================
+ *
+ * Anthony's daughter's iPhone: no prompt, ever. He turned the setting off and
+ * on again and still nothing, and reasonably concluded the game did not work
+ * on iPhone. Neither bug is anything to do with iOS.
+ *
+ *   1. THE ATTEMPT WAS LATCHED BEFORE THE OUTCOME WAS KNOWN. The caller set
+ *      `askedTilt = true` and then called this, on the reasoning that "iOS
+ *      offers the motion dialog exactly once, so asking twice is pointless".
+ *      That is true of a DENIAL and false of a FAILED CALL. Per spec the
+ *      method throws NotAllowedError when it is invoked without transient
+ *      activation — nothing has been asked, no dialog was shown, and the right
+ *      move is to try again on the next real tap. Instead one such throw
+ *      silently disabled asking for the rest of the session.
+ *
+ *   2. THE SETTINGS SWITCH NEVER CALLED IT. Turning TILT STEERING off and on
+ *      flipped a boolean and nothing else, so the one thing a player naturally
+ *      does when a feature seems dead could not possibly help.
+ *
+ * So: the latch now belongs to the OUTCOME, not the attempt, and this is
+ * called from the switch as well as from the first gesture.
+ *
+ * ===========================================================================
+ * AND 'denied' IS A DEAD END THE PLAYER HAS TO BE TOLD ABOUT
+ * ===========================================================================
+ *
+ * Once Safari has a refusal on file for a site it resolves 'denied' instantly
+ * and never shows the dialog again — reloading does not help, and neither does
+ * anything this code can do. The only way back is clearing that site's website
+ * data in iOS Settings. A game that silently does nothing in that state is
+ * indistinguishable from a game that is broken, so Settings says it. Same
+ * argument as the fullscreen refusal text.
+ */
 function askTilt() {
   const D = window.DeviceOrientationEvent;
-  if (D && typeof D.requestPermission === 'function') {
-    D.requestPermission().then((r) => {
-      if (r === 'granted') window.addEventListener('deviceorientation', onTilt, true);
-    }).catch(() => {});
+  if (!D || typeof D.requestPermission !== 'function') { tilt.perm = 'n/a'; return; }
+  // A refusal is final; do not pester. Anything else is worth another go.
+  if (tilt.perm === 'granted' || tilt.perm === 'denied') return;
+  let p;
+  try {
+    p = D.requestPermission();
+  } catch (e) {
+    // Thrown SYNCHRONOUSLY when there is no transient activation. Leaving perm
+    // at 'blocked' rather than latching is the whole fix for bug 1.
+    tilt.perm = 'blocked';
+    return;
   }
+  Promise.resolve(p).then((r) => {
+    tilt.perm = r === 'granted' ? 'granted' : 'denied';
+    if (r === 'granted') window.addEventListener('deviceorientation', onTilt, true);
+  }).catch(() => { tilt.perm = 'blocked'; });
 }
 
 /**
@@ -2758,15 +2904,19 @@ function readTouches(list) {
  * capture phase runs top-down before the target's own handlers, so a button
  * swallowing the event afterwards cannot stop the request going out.
  */
-let askedTilt = false;
 function firstGesture() {
-  // ASK ONCE, but KEEP TRYING for the other two. iOS offers the motion dialog
-  // exactly once, so asking twice is pointless; fullscreen and the wake lock
-  // can be refused for reasons that go away — and if the only thing a player
-  // ever touches is a button, a single attempt was the only attempt they got.
-  // Anthony's phone came back "refused: TypeError" and stayed windowed for the
-  // rest of the session with no way to retry short of reloading.
-  if (!askedTilt) { askedTilt = true; askTilt(); }
+  // KEEP TRYING, ALL THREE. This used to latch tilt to a single attempt on the
+  // reasoning that iOS only ever offers the dialog once. It only declines
+  // once; a call that FAILS for want of a user gesture has asked nobody
+  // anything, and latching on the attempt rather than the outcome is what made
+  // tilt permanently dead on an iPhone. askTilt() now owns that decision and
+  // returns immediately once there is a real answer. Fullscreen and the wake
+  // lock were always retried, for the same underlying reason: if the only
+  // thing a player ever touches is a button, one attempt was the only attempt
+  // they got, and Anthony's phone came back "refused: TypeError" and stayed
+  // windowed for the rest of the session with no way to retry short of a
+  // reload.
+  askTilt();
   audio.resume();   // browsers refuse audio outside a gesture; iOS starts suspended
   keepAwake();
   goFullscreen();
@@ -2784,6 +2934,12 @@ function firstGesture() {
 }
 document.addEventListener('touchstart', firstGesture, { capture: true, passive: true });
 document.addEventListener('mousedown', firstGesture, { capture: true, passive: true });
+// AND `click`, WHICH IS THE ONE THE SPEC ACTUALLY NAMES. MDN's wording for
+// requestPermission is "must be triggered by a UI event such as a button
+// click". touchstart should qualify and does on everything tested, but this is
+// a permission that can only be requested a handful of times before the player
+// gives up, so it is not the place to be clever about which events count.
+document.addEventListener('click', firstGesture, { capture: true, passive: true });
 
 const onTouch = (e) => {
   firstGesture();
@@ -3326,6 +3482,9 @@ function frame(now) {
   // 161mph instead of 202. A measurement whose known-good case is wrong is not
   // reporting on the game, and every other row it printed was worthless too.
   if (tune.holdX !== null) st.x = tune.holdX;
+  // AFTER the acceleration and the distance advance, so it wins. See the note
+  // on tune.holdSpeed: pinning it from outside the loop does not hold.
+  if (tune.holdSpeed !== null) st.speed = tune.holdSpeed;
 
   // NOTHING IS UNDER THE TYRES IN MID-AIR. Leaving this running meant a car
   // flying the gap while drifting wide kept paying the verge's drag and kept
@@ -3665,10 +3824,24 @@ const menu = buildMenu({
     // real browser.
     fsState: /not supported|unsupported/i.test(fs.state) ? 'unsupported' : fs.state,
     fullscreen: fs.state === 'fullscreen' ? 'on' : /refused/i.test(fs.state) ? 'refused' : 'off',
+    // WHAT THE MOTION SENSOR SAID. Only interesting on iOS — everywhere else
+    // it reads 'n/a' and the menu hides the row. See tilt.perm.
+    tiltPerm: tilt.perm,
+    tiltOk: tilt.ok,
   }),
   toggle: (k) => {
     if (k === 'sound') audio.setMuted(!audio.muted);
-    else if (k === 'tilt') { tilt.enabled = !tilt.enabled; if (!tilt.enabled) tilt.on = false; else recentreTilt(); }
+    else if (k === 'tilt') {
+      tilt.enabled = !tilt.enabled;
+      if (!tilt.enabled) tilt.on = false;
+      // TURNING IT ON ASKS. The switch runs from a real tap on a real button,
+      // which is the best transient activation available anywhere in the game
+      // — better than the first touch, which may have landed on the canvas
+      // before the player had any idea what they were agreeing to. Without
+      // this there was no route at all to a second attempt, so "turn it off
+      // and on again" — the first thing anybody tries — could not work.
+      else { recentreTilt(); askTilt(); }
+    }
     else if (k === 'invert') { tilt.invert = !tilt.invert; recentreTilt(); }
     else if (k === 'readout') { document.body.classList.toggle('lean'); worst = 0; }
   },

@@ -82,50 +82,204 @@ swapped and crop to the same box, so it is a straight swap either way.
   which is what an in-app browser does, it says THAT instead, because the fix
   belongs to the player: open the link in Chrome or Safari.
 
-## 2. A second track — WASTELAND (next up)
+## 2. THE DOCKS — the second track (next up)
 
-Anthony's call after the landing page landed, and his reasoning: a second track
-"is what will make it the most interesting". A number of jumps, scrap and junk
-lying about — and BEATEN-UP CONCRETE rather than dirt, which was his own
-revision and a good one: "we can do a dirt track another time."
+Decided 20 August, replacing the wasteland idea and merging with the daytime
+one, which was always going to be the same job. Anthony: shipping containers,
+cranes, "part of the track could enter a large car ferry at one end and exit at
+the other with a jump over water to land", a longer lap, and a low sunny sky.
 
-That change is worth more than it sounds. A dirt surface would have meant
-re-tuning grip, the off-road penalty and the tyre noise from scratch, because
-all three are built around tarmac being the good surface and the verge being
-the punishment — and on a dirt track there is no road to leave. Cracked
-concrete is still a hard surface with a hard edge, so the whole handling model
-carries over and the work becomes what it should be: geometry, colour and junk.
+**Lap: about 90 seconds.** At the car's 202mph cap that is 5.05 miles, 18,900
+world units — which fits inside the existing 4,000-segment profile generator
+without changing it (a night-city lap uses 12,000 of 24,000). Length costs
+NOTHING per frame: the road only ever builds the 220 segments ahead of you, so
+a longer track is more variety to fill and no more work to draw.
 
-**The jumps are nearly free and that is worth knowing before scoping it.** The
-broken bridge did not add a special case — main.js launches the car whenever
-the road falls away faster than gravity can hold it, which is general physics,
-substepped below the size of a segment so a slow phone cannot step over a crest.
-Any ramp shaped into `track.hill` becomes a jump automatically. See the note by
-GRAVITY and the three wrong versions of that test recorded above it.
+### Most of this already exists
 
-What is genuinely new:
+The two headline features are re-skins rather than new systems, and that is the
+main reason this track is a good next job rather than a huge one:
 
-- **Scrap and junk.** The scenery system draws a city from a hash; junk wants
-  the same treatment rather than placed objects, or it costs draw calls.
-- **The daytime question is still open.** A wasteland reads naturally as
-  daylight, which merges this with the "blue sky" job below — but every ink
-  weight, the fog and the building brightness were tuned against a night
-  reference. Worth deciding deliberately rather than by accident.
+- **The ferry's car deck is the tunnel.** `src/world/tunnel.js` already takes
+  `atSeg`/`lenSeg`, costs one draw call while on screen and none when it is
+  not, and exposes `.inside()` and `.enclosure()` for the audio. A steel vehicle
+  deck is that module with different colours and different props.
+- **The exit jump is the bridge.** main.js launches the car whenever the road
+  falls away faster than gravity can hold it — general physics, substepped
+  below the size of a segment. Any ramp shaped into `track.hill` is a jump. A
+  bow ramp is a ramp.
+- **Falling in the water is the hole.** `track.gap` plus the crash state and
+  the results card already do exactly this, and Anthony already chose
+  crash-and-restart for the bridge, so the water should behave the same way for
+  consistency rather than inventing a second kind of failure.
+- **Container stacks are the city.** The scenery system draws thousands of
+  boxes placed and coloured from a hash, in one draw call. A container IS a
+  box, and a cheaper one than a building because it needs no windows.
 
-## 3. A daytime track — blue sky
+### Water down one side, and it is the CHEAP option
 
-Blue sky, sunny. The night one is called **MIDNIGHT MILE** — `TRACK_NAME` in
-src/ui/menu.js. It was "Night City" for about four hours until Anthony pointed
-out that is Cyberpunk 2077's, and has been since 1988.
+Anthony left this to me. Water alongside for a good part of the lap, plus one
+causeway stretch with water on both sides on the run to the ferry.
 
- The whole palette so far is a night city, so this is a bigger
-job than "change the sky colour": the ink weights, the fog, the building
-brightness and the headlight-lit tarmac were all tuned against a night
-reference, and half of them will read wrong at noon.
+The reasoning is not aesthetic. **A water surface is cheaper than land.** The
+road mesh already emits ground quads either side of the tarmac every frame;
+on the water side those quads simply get a water colour, which costs nothing
+and REPLACES the thousands of instanced boxes that would otherwise fill that
+half of the view. Water alongside is fewer draw calls and fewer triangles than
+container stacks alongside, not more. It also gives the horizon somewhere to
+be that is not another row of boxes, which is the thing that will stop a
+five-mile lap feeling like one mile driven five times.
 
-Worth doing before the garage, on Anthony's call, because a second track is what
-turns "a track" into "a game" — and it is the thing that forces the per-track
-lap times below.
+### More jumps, and an underpass — added 18 August
+
+Anthony, on the shape of the lap: *"We should have more than one jump in the
+new finished docks track. We could also have an obstacle where we race down and
+under something and then back to ground level, that would be cool. A lot of
+variety would be a good thing to make it interesting."*
+
+Both are elevation, and elevation is the one thing this engine gives away free:
+the road, the pavement, the barrier and the camera all read `track.hill`, so
+anything shaped into that profile exists for every system at once and costs
+nothing to draw. The bridge proved it — it has no mesh of its own.
+
+- **Jumps.** The bow ramp off the ferry is one. A second wants to be a
+  different KIND rather than a second copy: the bridge is a hump you clear at
+  speed, so the other could be a short steep launch off a quay ramp where the
+  landing is visible before you leave the ground, which reads as a decision
+  rather than as a surprise.
+- **The underpass.** Dip the hill, put a slab across the top. The slab is the
+  tunnel module with a length of a few segments and no side walls — a bridge
+  over the road rather than a tube around it — so the sky closes for a second
+  and reopens. Cheaper than the tunnel, because it is shorter and open-sided,
+  and it gives the low sun something to strobe behind, which is exactly the
+  moment a fixed golden-hour sun pays for itself.
+
+Both need the same care the bridge needed: the launch integration is substepped
+below half a segment because it was wrong three times, and any new ramp is a
+new test of it, not a re-use of a solved one. `tools/bridge.mjs` is the shape
+of that test.
+
+### The daylight is the real work, and it should be done FIRST
+
+Golden hour, low sun — Anthony's choice, and the right one for a renderer with
+no lights in it, because a low sun is the case where baked per-face colour does
+the most work. Warm on the lit side, cool in shade, long shading down the flank
+of every container stack.
+
+**But it is also the biggest unknown on this list**, and it has nothing to do
+with docks. Every ink weight, the fog, the building brightness and the tarmac
+tone were tuned against a NIGHT reference and measured against it. Whether the
+comic-book look survives daylight at all is unproven.
+
+So the order should be: **prove the daylight palette on the track that already
+exists**, before building five miles of new track for it. Same road, same
+scenery, blue sky and a baked sun — an afternoon's work that answers the
+question that everything else depends on. If it reads badly there it will read
+badly at the docks, and finding that out after building the docks is the
+expensive way round.
+
+One consequence of a fixed sun worth deciding early: the track has a west. You
+will drive towards the sun on some stretches and away from it on others, and
+driving into a low sun is either a lovely piece of atmosphere or an annoyance.
+Worth choosing deliberately rather than discovering.
+
+Anthony chose: *"The sun being atmosphere that is actually annoyance is the
+realistic approach if we think about it. Golden hour sun that gets in your eyes,
+that's all a part of driving in rl."* So it is an annoyance, on purpose, and it
+comes and goes with the heading. See the note in `src/art/theme.js` about why
+the SHADING has to say the sun is behind you even so — a backlit city in a
+renderer with no lights is a city of black masses, which is the exact failure
+the spike was looking for.
+
+### DONE, 18 August: the daylight spike
+
+`?theme=golden` on the URL, `src/art/theme.js`, `tools/daylight.mjs` and
+`tools/nightsame.mjs`. **The answer is yes** — the comic-book look survives
+golden hour, and by the only measure that matters it gets stronger: ink strokes
+12.0% -> 17.3% of the frame, local contrast 4.5 -> 6.3, at identical draw calls
+and triangles. It is a spike, NOT a second track: the night city is untouched
+and `nightsame.mjs` proves it exactly rather than by eye.
+
+What it cost was worth more than the answer. **Colour lived in five places and
+the palette was only one of them**, which no amount of reading the code had
+revealed:
+
+1. `PAL` — the sky, the road, the fog. The only one anybody knew about.
+2. **The city's instance tint.** `Scenery` generates a colour per building from
+   a hardcoded HSL and never reads `PAL.wall` — despite `wall:` being commented
+   "measured: the building faces in the reference". Overriding the palette gave
+   a blue sky over a night city.
+3. **The facade tile.** `windowTexture()` paints concrete, spandrels, sills and
+   glass from its own literals, and a building's final colour is the instance
+   tint TIMES the face shade TIMES that texel. Fixing (2) turned the DISTANT
+   city sandy and left the near buildings slate blue, because up close the tile
+   is most of what you are looking at.
+4. **The per-face shade.** `FLANK = [0.30, 0.32, 0.39]` — an unlit side of a
+   building. In a renderer with no lights this is the only place a sun
+   direction can exist at all.
+5. **`CITY_INK`.** The outline around every building, a separate constant from
+   `PAL.ink`. A sunlit city outlined in cold night blue-black.
+
+Number five was not found by looking at it — it is a two-pixel line. It came
+out of `nightsame.mjs`'s positive control, which loads the golden theme and
+asserts that everything the tool measures CHANGES. The ink was the one value
+that did not, and both possible explanations turned out to be true at once: the
+theme missed it AND the tool was blind to it.
+
+**And the sky's stop POSITIONS mattered more than its colours.** The gradient is
+stretched across the SCREEN, and sampling a sky column shows the visible sky
+ends at v=0.35 — the road and the cockpit have the rest. The night stops put
+skyLow at 0.72, skyGlow at 0.92 and haze at 1.00, so all three warm bands were
+being drawn underneath the tarmac. The first golden build was a flat midday
+blue for that reason alone and no choice of warm colour would have fixed it.
+
+*A free win for the night track whenever it is wanted:* `PAL.skyGlow` is
+commented "the city's own light, just above the rooftops" and by the same
+arithmetic it has never once been on screen. Not touched here, because Anthony
+has called that track finished and a spike is not the place.
+
+**Still night-coloured in a golden frame, and none of it blocks the Docks:**
+
+- the street lamps still throw warm pools (`furniture.js`) — a lamp in daylight
+  is off, and this is the most visible remaining tell
+- the Armco, the gantries and the tunnel interior bake their own colours; the
+  tunnel barely matters, since a tunnel is dark at any hour, and its far mouth
+  already reads correctly as daylight
+- the glare itself, which is deliberately out of scope — see above
+
+### The scenery list, cheapest first
+
+Everything here is boxes and prisms unless noted, which is what this engine
+wants:
+
+- **container stacks** — the hash-placed box field, recoloured. Effectively free.
+- **warehouses** — big boxes with roller doors; the existing buildings, reskinned.
+- **the water** — ground quads recoloured. Free, and saves what it replaces.
+- **quayside edge** — bollards, tyre fenders, a concrete lip. Tiny.
+- **chain-link fence** — a strip mesh like the Armco, one draw call.
+- **light masts and floodlight towers** — thin verticals, instanced. Good for
+  breaking up a flat skyline and they suit a working dock at any hour.
+- **gantry cranes** — box legs and a boom. Tall landmarks you can see from a
+  mile off, which is what a five-mile lap needs to stop it feeling repetitive.
+  Probably worth their own instanced mesh: +1 draw call.
+- **straddle carriers, reach stackers, forklifts** — box assemblies, parked.
+- **oil drums, pallet stacks, cable reels** — cylinders cost more triangles
+  than boxes; use sparingly and near the road where they are seen.
+- **a ship alongside** — one big merged mesh, drawn once, as a landmark. The
+  ferry itself is this plus the tunnel.
+- **a container ship on the horizon** — the skyline element that replaces the
+  city towers.
+- **sun glitter on the water** — a bright band on the water quads pointing at
+  the sun. One colour ramp, no geometry, and it is most of what will sell
+  golden hour.
+- **gulls** — small moving quads, if there is budget left. Motion in the sky is
+  cheap and nothing else up there moves.
+
+### Draw calls
+
+16 is the budget and 13 is the worst moment today. The docks reuses the scenery,
+furniture and barrier slots rather than adding to them; water is free; cranes
+are the one likely addition. It should come in at or under where the city sits.
 
 ## 4. Points and credits
 
@@ -175,6 +329,49 @@ motion to hide behind. It gets to be the best-looking thing in the game.
 
 ---
 
+## An engine recording, to score the synthesis against
+
+Not a fix — the V8 measures well and Anthony has said it reads right. This is
+the missing HALF of how everything else here gets judged.
+
+`tools/audio.mjs` measures the engine's internal consistency: the firing
+harmonic lands where `cylinders x rpm/120` says, the V8 carries half-order
+energy where the V12 does not, the limiter holds, the upshift is an event
+rather than a hole. What it cannot measure is RESEMBLANCE, because there is
+nothing to resemble. Every number in the v8 spec was reasoned to and then tuned
+by ear, and the ear has been the only judge — which is exactly the position the
+car was in before the reference image, when nobody could tell whether the
+missing 16% of the silhouette score was the model or the measurement.
+
+With a real recording an agent can FFT it at known rev points, read the actual
+harmonic amplitudes, the real half-order ratio and the real roll-off, and then
+score our spectrum against it per harmonic. "Sounds better" becomes a number
+and the ear becomes the tie-breaker rather than the whole court.
+
+**IT NEVER SHIPS.** No downloaded assets — the clip is a development reference
+exactly like the car pictures, used to derive the spec and then left in `ref/`.
+The game goes on synthesising every sound it makes.
+
+### What makes a clip useful, in order
+
+1. **One gear, idle to the limiter, in one clean sweep.** This is the whole
+   prize. In a single gear the revs rise smoothly and rpm is recoverable from
+   the firing frequency itself, so every frame is a labelled data point. Gear
+   shifts break the sweep into fragments that have to be stitched.
+2. **The right engine, and labelled as such.** A big lazy pushrod V8 with a
+   4,500-5,000 redline — the car is a '67 Camaro. Not a turbo, not a flat-plane
+   exotic, not a modern V8 with an active exhaust. The cylinder count has to be
+   known, because it is what converts firing frequency back into rpm.
+3. **Exhaust side, not the cabin.** The model is of what comes out of the pipe.
+4. **Raw, not produced.** Sample libraries often bake in reverb, EQ and
+   compression, and all three move exactly the numbers being measured. A rough
+   phone recording of a real car beats a polished library asset here.
+5. **High bitrate.** WAV or FLAC ideally; a low-bitrate MP3 mangles the upper
+   harmonics that set `tilt`. 320k is acceptable.
+6. **Short is fine.** Ten to twenty seconds of pull is plenty. A steady idle and
+   a steady cruise are useful extras, not requirements.
+7. **Clean.** No music, no commentary, minimal wind and road noise.
+
 ## Carried forward, smaller
 
 - **Per-track best times.** `BEST_KEY` in main.js is `svu-racer-best-v2` and the
@@ -193,6 +390,27 @@ motion to hide behind. It gets to be the best-looking thing in the game.
   give 16, in which case the splice lines and reflectors could fight the rail
   down its length. Nobody has been able to test this. If it shimmers, raise the
   0.0016 factor in `barrier.js` to 0.003, then drop the ribs.
+- **Tilt on iPhone — FIXED 18 August, UNVERIFIED ON A REAL PHONE.** Anthony's
+  daughter's iPhone never showed the motion prompt, and switching TILT STEERING
+  off and on in Settings did nothing. Two bugs, neither of them iOS's fault:
+  the attempt was latched instead of the outcome, so a single
+  `NotAllowedError` (which means *nothing was asked*) disabled asking for the
+  whole session; and the Settings switch never called `askTilt()` at all, so
+  the first thing any player tries could not work. Both fixed, plus `click` as
+  an activation source alongside `touchstart`.
+
+  The game now RECORDS what iOS said — `tilt.perm` is one of
+  `n/a / unasked / blocked / denied / granted` — and the TILT row in Settings
+  says which, because the three failures have three different fixes and one of
+  them is only the player's to make: once Safari has a refusal on file it never
+  shows the dialog again, and the way back is deleting the site's data in iOS
+  Settings. Same reasoning as the fullscreen refusal text.
+
+  `tools/tiltperm.mjs` fakes `DeviceOrientationEvent.requestPermission` and
+  drives all five branches including a negative control. It fails all five
+  against the pre-fix bundle. **What no harness here can prove is that real
+  Safari accepts our tap as transient activation** — that needs the phone, and
+  the Settings row is what will say so next time.
 - **iPhone.** Being tested 12 August. See the four things worth checking in the
   chat of 11 August: fullscreen (iPhone Safari has no Fullscreen API at all, so
   `fs.state` should read `unsupported` and the layout has to survive Safari's

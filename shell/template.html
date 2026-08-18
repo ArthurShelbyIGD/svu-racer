@@ -306,6 +306,11 @@
   .sText { text-align: left; }
   .sLabel { font-size: max(11px, 2.5vmin); letter-spacing: 0.08em; }
   .sNote { font-size: max(9px, 1.9vmin); color: #7b8290; line-height: 1.4; margin-top: 0.4vmin; }
+    /* THE ONE NOTE THAT IS AN INSTRUCTION RATHER THAN A DESCRIPTION. Used only
+       when iOS has blocked motion access and the player has to go and undo it
+       — see TILT_NOTE in src/ui/menu.js. Amber rather than red: nothing is
+       broken, there is just something to do. */
+    .sNote.sWarn { color: #e8b23c; }
   .sCtl { display: flex; align-items: center; gap: 1.2vmin; flex: none; }
   .sSw { min-width: max(56px, 12vmin); }
   .sSw.on { background: #2f7d1acc; border-color: #8ee23f; }

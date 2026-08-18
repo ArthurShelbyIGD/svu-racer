@@ -17,12 +17,40 @@ at the end of every round of work:
 
 | File | What it is |
 |---|---|
-| `racer-src.tgz` | The whole racer working tree, minus `node_modules`. **This is the master copy.** |
+| `racer-src.tgz` | The whole racer working tree, minus `node_modules`. **This is the master copy.** Built by `sh tools/pack.sh` — do NOT hand-roll the tar, see below. |
 | `svu-catchup.bundle` | An incremental git bundle of the `svu-run` repo, for pushing the built page to GitHub Pages. |
 
 They are reachable from a session via the device bridge
 (`mcp__remote-devices__device_stage_files`), which stages them into
 `/mnt/user-data/uploads/`.
+
+## Building it: `sh tools/pack.sh`, never by hand
+
+The archive has exactly two properties that matter, and hand-rolling the tar
+got both wrong once and cost Anthony a confusing git session on 18 August:
+
+1. **The contents are at the TOP LEVEL, no wrapping directory.** He extracts
+   this straight over his working tree and commits from it. A `racer/` wrapper
+   means the working tree is never updated and a duplicate copy appears beside
+   it.
+2. **It contains no `.git`.** With one inside, the extracted folder IS a git
+   repository, so his `git add -A` hits *"you've added another git repository
+   inside your current repository"* and stages a gitlink — a pointer to a commit
+   that exists nowhere else. Push that and collaborators get an empty folder.
+
+`tools/pack.sh` asserts both and exits non-zero rather than writing a bad file.
+
+If it has already happened, the fix is not destructive. From the repo root:
+
+```
+git rm -r --cached racer      # unstage the gitlink; touches no files
+rm -rf racer                  # or move it aside first if unsure
+tar -xzf ~/Downloads/racer-src.tgz
+git add -A && git status      # read this before committing
+```
+
+If it was already committed, `git reset --soft HEAD~1` first — that keeps every
+file and only undoes the commit.
 
 ## Recovering
 

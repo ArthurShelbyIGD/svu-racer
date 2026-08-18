@@ -10,3 +10,17 @@ node_modules
 shots/
 tools/out/
 *.tgz
+
+# A STRAY `racer/` AT THE ROOT, WHICH IS A MISTAKE'S LANDING PAD.
+#
+# The backup tarball is extracted straight over this working tree, and one
+# badly-built one had a `racer/` wrapper AND a .git inside it — so extracting
+# it created a whole second repository here instead of updating the files.
+# `git add -A` then staged that as a gitlink and git printed a page of hints
+# about embedded repositories, three times, because the bad tarball was still
+# sitting in Downloads and got picked again by muscle memory.
+#
+# Ignoring the path means the next time it happens it is a stray folder to
+# delete rather than something that reaches a commit. tools/pack.sh is the
+# real fix; this is the seatbelt.
+/racer/

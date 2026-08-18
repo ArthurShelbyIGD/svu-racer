@@ -1,3 +1,4 @@
+import { TRACKS, TRACK_ORDER, trackName, chooseTrack } from '../world/tracks.js';
 /**
  * THE LANDING PAGE — the first thing anyone sees, and the shape of the game.
  *
@@ -60,7 +61,7 @@ const $ = (id) => document.getElementById(id);
  * entirely rather than "Day City". One constant, so renaming it is one edit
  * and the lap-times panel and the track picker cannot drift apart.
  */
-export const TRACK_NAME = 'MIDNIGHT MILE';
+export const TRACK_NAME = TRACKS[trackName()].name;
 
 /**
  * Build the menu's markup once, at boot.
@@ -136,6 +137,12 @@ function markup() {
     <button class="mB mBack">BACK</button>
   </div>
 
+  <div class="mPanel mCard" id="pTracks">
+    <h2>TRACKS</h2>
+    <div id="trkBody"></div>
+    <button class="mB mBack">BACK</button>
+  </div>
+
   <div class="mPanel mCard" id="pSoon">
     <h2 id="soonTitle"></h2>
     <p id="soonBody"></p>
@@ -176,7 +183,7 @@ export function buildMenu(api) {
   $('mBg').style.backgroundImage = `url(${CITY_PNG})`;
 
   let panel = 'pMain';
-  const PANELS = ['pMain', 'pTimes', 'pSettings', 'pSoon', 'pResult'];
+  const PANELS = ['pMain', 'pTimes', 'pSettings', 'pTracks', 'pSoon', 'pResult'];
   const show = (id) => {
     panel = id;
     for (const p of PANELS) $(p).classList.toggle('on', p === id);
@@ -215,14 +222,47 @@ export function buildMenu(api) {
     b.addEventListener('touchstart', go, { passive: false });
   }
 
+  /**
+   * THE TRACK PICKER, WHICH RELOADS THE PAGE AND SAYS SO.
+   *
+   * Choosing a track cannot take effect in place: the city's colours, the
+   * facade texture, the barrier's buffers and the car's grip are all baked
+   * before the first frame, from the track. So the button stores the choice
+   * and reloads — under a second from cache, and one line of mechanism instead
+   * of a teardown-and-rebuild subsystem nobody would trust.
+   *
+   * The player is told, because a screen that goes blank for a moment with no
+   * warning reads as a crash. "LOADING…" on the button is the whole of it.
+   */
+  const trkBody = $('trkBody');
+  trkBody.innerHTML = TRACK_ORDER.map((id) => {
+    const t = TRACKS[id];
+    return `<div class="sRow">
+      <div class="sText"><div class="sLabel">${t.name}</div><div class="sNote">${t.blurb}</div></div>
+      <div class="sCtl"><button class="mB trkPick" data-t="${id}"></button></div>
+    </div>`;
+  }).join('');
+  for (const b of trkBody.querySelectorAll('.trkPick')) {
+    const go = (e) => {
+      e.stopPropagation(); e.preventDefault();
+      if (b.dataset.t === trackName()) return;      // already on it; the label says DRIVING
+      if (!chooseTrack(b.dataset.t)) return;
+      b.textContent = 'LOADING…';
+      // A BEAT BEFORE RELOADING, so the label is actually painted. Reloading
+      // synchronously off the tap gives a frozen button and then a white
+      // flash, which is the same thing a broken page looks like.
+      setTimeout(() => location.reload(), 60);
+    };
+    b.addEventListener('click', go);
+    b.addEventListener('touchstart', go, { passive: false });
+  }
+
   const soon = (title, body) => { $('soonTitle').textContent = title; $('soonBody').textContent = body; show('pSoon'); };
 
   on('mRace', () => { close(); api.race(); });
   on('mTimes', () => { show('pTimes'); refresh(); });
   on('mSettings', () => { show('pSettings'); refresh(); });
-  on('mTracks', () => soon('TRACKS',
-    `One track for now — ${TRACK_NAME}. A daytime circuit with a blue sky is ` +
-    'next, and this is where you will pick between them.'));
+  on('mTracks', () => { show('pTracks'); refresh(); });
   on('mGarage', () => soon('GARAGE',
     'Not built yet. Credits earned by racing will buy engines, gearboxes and ' +
     'paint here, and the car will finally be somewhere you can walk round it.'));
@@ -327,6 +367,15 @@ export function buildMenu(api) {
     // first tap kept that line forever, on a phone with no such prompt. Caught
     // by the negative control in tools/tiltperm.mjs, which is the only case in
     // that harness with no iPhone in it.
+    // DRIVING vs DRIVE, so the picker says which one you are on rather than
+    // offering four identical buttons and leaving you to remember.
+    for (const b of trkBody.querySelectorAll('.trkPick')) {
+      if (b.textContent === 'LOADING…') continue;
+      const here = b.dataset.t === trackName();
+      b.textContent = here ? 'DRIVING' : 'DRIVE';
+      b.classList.toggle('trkHere', here);
+    }
+
     const tn = sBody.querySelector('.sNote[data-n="tilt"]');
     if (tn) {
       tn.textContent = TILT_NOTE[s.tiltPerm] || TILT_NOTE.granted;

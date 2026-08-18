@@ -116,6 +116,25 @@ const probe = async (html) => {
         return Array.from(t.getContext('2d').getImageData(0, 0, 1, t.height).data).join(',');
       })(),
       fog: R.scene.fog.color.getHexString() + ' / ' + R.scene.fog.density,
+      // THE ROAD ITSELF, which the colour checks above cannot see at all.
+      // buildTrack was refactored to take its constants from the track rather
+      // than from literals, and the profile comes out of a SEEDED xorshift —
+      // so one extra draw, or two reordered, silently reshapes every corner
+      // after it. Hashing both arrays is the only honest way to say the road
+      // did not move.
+      road: (() => {
+        let h = 2166136261;
+        const eat = (a) => { const b = new Uint8Array(a.buffer, a.byteOffset, a.byteLength);
+          for (let i = 0; i < b.length; i++) { h ^= b[i]; h = Math.imul(h, 16777619); } };
+        eat(R.track.curve); eat(R.track.hill);
+        return (h >>> 0) + ' over ' + R.track.n + ' segments';
+      })(),
+      // And what the road implies. CENTRIFUGAL is derived from the worst corner
+      // in the profile, so it is a one-number checksum of the handling: if the
+      // corners moved, the car's grip moved with them.
+      race: `from ${R.consts.RACE_FROM} for ${R.consts.RACE_LEN}` +
+            `, worst corner ${R.handling.worst.toFixed(5)}` +
+            `, centrifugal ${R.handling.cent.toFixed(5)}`,
     };
   });
   await p.close();
@@ -123,12 +142,16 @@ const probe = async (html) => {
 };
 const a = await probe(refHtml);
 const c = await probe(__j(ROOT, 'docs', 'index.html'));
-// THE POSITIVE CONTROL. A test that has only ever passed has not been shown to
-// work; it has been shown to be capable of printing "same". So the current
-// build is also probed with ?theme=golden, where every one of these values is
-// supposed to be different, and if the tool reports THAT as identical then the
-// tool is broken and its pass above means nothing.
-const g = await probe(__j(ROOT, 'docs', 'index.html') + '?theme=golden');
+// THE POSITIVE CONTROL, AND IT IS `?track=docks` RATHER THAN `?theme=golden`
+// NOW. A test that has only ever passed has not been shown to work; it has
+// been shown to be capable of printing "same". The theme override was the
+// right control while colour was the only thing being checked, but it cannot
+// move the road — so the two new road checks would have come back "same" from
+// a control that was supposed to change everything, and I would have had to
+// decide by eye which "same" was a pass and which was blindness. The Docks
+// changes the palette AND the profile in one load, which is exactly one
+// control for exactly one claim: this tool can tell two tracks apart.
+const g = await probe(__j(ROOT, 'docs', 'index.html') + '?track=docks');
 await b.close();
 
 const WHAT = {
@@ -139,6 +162,8 @@ const WHAT = {
   mean: 'what the city averages to, which the distance fade lerps toward',
   sky:  'the sky gradient, read back off the built texture',
   fog:  'fog colour and density',
+  road: 'the road itself — every curvature and every height, hashed',
+  race: 'start, length, worst corner and the grip derived from it',
 };
 console.log(`\n  THE NIGHT TRACK, CURRENT TREE vs ${REF}\n`);
 let bad = 0;
@@ -163,7 +188,7 @@ for (const k of Object.keys(WHAT)) {
 }
 const keys = Object.keys(WHAT);
 const moved = keys.filter((k) => c.r[k] !== g.r[k]);
-console.log(`\n  positive control: the same build with ?theme=golden differs on ` +
+console.log(`\n  positive control: the same build as ?track=docks differs on ` +
             `${moved.length} of ${keys.length}`);
 if (moved.length < keys.length) {
   console.log(`  BUT NOT ON: ${keys.filter((k) => !moved.includes(k)).join(', ')}`);

@@ -68,7 +68,7 @@ const b = await chromium.launch({
 // 1 and 2: THE GEOMETRY, on every screen and in every panel.
 console.log('\n  DOES IT FIT\n');
 console.log('  screen                      panel      widest   tallest   smallest button');
-const PANELS = ['pMain', 'pTimes', 'pSettings', 'pSoon', 'pResult'];
+const PANELS = ['pMain', 'pTimes', 'pSettings', 'pTracks', 'pSoon', 'pResult'];
 for (const s of SCREENS) {
   const p = await b.newPage({ viewport: { width: s.w, height: s.h } });
   await p.goto(FILE, { waitUntil: 'load' });
@@ -86,7 +86,7 @@ for (const s of SCREENS) {
     const r = await p.evaluate((id) => {
       // Show the panel directly rather than clicking through to it: this test
       // is about geometry, and the click path is tested separately below.
-      for (const q of ['pMain', 'pTimes', 'pSettings', 'pSoon', 'pResult']) {
+      for (const q of ['pMain', 'pTimes', 'pSettings', 'pTracks', 'pSoon', 'pResult']) {
         document.getElementById(q).classList.toggle('on', q === id);
       }
       if (id === 'pSoon') {
@@ -332,7 +332,7 @@ console.log('\n  DO THE BUTTONS WORK\n');
 
   const state = () => p.evaluate(() => ({
     menu: document.getElementById('menu').classList.contains('show'),
-    panel: ['pMain', 'pTimes', 'pSettings', 'pSoon', 'pResult']
+    panel: ['pMain', 'pTimes', 'pSettings', 'pTracks', 'pSoon', 'pResult']
       .find((q) => document.getElementById(q).classList.contains('on')) || null,
     race: window.RACER.race.state,
     lean: document.body.classList.contains('lean'),
@@ -346,7 +346,7 @@ console.log('\n  DO THE BUTTONS WORK\n');
      `panel ${boot.panel}, race ${boot.race}`);
 
   for (const [btn, want] of [['mTimes', 'pTimes'], ['mSettings', 'pSettings'],
-                             ['mTracks', 'pSoon'], ['mGarage', 'pSoon']]) {
+                             ['mTracks', 'pTracks'], ['mGarage', 'pSoon']]) {
     await p.click('#' + btn); await p.waitForTimeout(150);
     const st = await state();
     ok(st.panel === want, `${btn} opens ${want}`, `got ${st.panel}`);
@@ -357,6 +357,30 @@ console.log('\n  DO THE BUTTONS WORK\n');
 
   // SETTINGS HAVE TO REACH THE GAME. A switch that flips its own label and
   // nothing else is the exact failure the nitrous gauge nearly shipped with.
+  // ---- THE TRACK PICKER ---------------------------------------------------
+  //
+  // A button that says DRIVE and does nothing is worse than no button, and the
+  // GARAGE/TRACKS pair spent a fortnight as "coming soon" panels precisely so
+  // that would not happen. Now that TRACKS is real it gets the same treatment
+  // every other button here does: prove it reaches something.
+  //
+  // The RELOAD is deliberately not exercised. It would take the page away
+  // mid-sweep and every check after it would be measuring a fresh boot, and
+  // "does location.reload reload" is not a claim worth a rig. What is worth
+  // checking is everything up to it: both tracks listed, the current one
+  // marked so you can tell where you are, and the other one offering to go.
+  await p.click('#mTracks'); await p.waitForTimeout(200);
+  const trk = await p.evaluate(() => Array.from(document.querySelectorAll('.trkPick'))
+    .map((b) => ({ id: b.dataset.t, label: b.textContent,
+                   name: b.closest('.sRow').querySelector('.sLabel').textContent })));
+  ok(trk.length >= 2, 'the picker lists more than one track',
+     trk.map((t) => `${t.name} [${t.label}]`).join('  |  '));
+  ok(trk.filter((t) => t.label === 'DRIVING').length === 1,
+     'exactly one track is marked as the one you are on',
+     trk.filter((t) => t.label === 'DRIVING').map((t) => t.name).join(',') || 'none');
+  ok(trk.some((t) => t.label === 'DRIVE'), 'and the other one offers to take you there');
+  await p.click('#pTracks .mBack'); await p.waitForTimeout(150);
+
   await p.click('#mSettings'); await p.waitForTimeout(150);
   const before = await state();
   await p.click('.sSw[data-k="sound"]'); await p.waitForTimeout(150);

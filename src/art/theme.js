@@ -1,3 +1,5 @@
+import { currentTrack } from '../world/tracks.js';
+
 /**
  * THE TIME OF DAY, AS A SET OF COLOURS.
  *
@@ -254,6 +256,26 @@ export const GOLDEN = {
   // warm colour is exactly what makes cheap daylight art look pasted together,
   // which is written at the top of this file and was still got wrong.
   cityInk: 0x16100a,
+
+  // ---- THE SEA ------------------------------------------------------------
+  //
+  // Water has no colour of its own worth speaking of; it is the sky, lying
+  // down. So these are the sky's own values darkened and pushed slightly
+  // green, which is what an estuary does to a warm evening — and it means the
+  // water cannot drift out of key with the horizon it meets, because it was
+  // derived from it.
+  //
+  // TWO BANDS, alternating per segment like the tarmac, and further apart than
+  // the road's two. The ground fills the outer half of the frame, which is
+  // where peripheral vision reads speed from, and open water is the one
+  // surface with nothing else in it to move — no kerbs, no posts, no buildings.
+  // The banding IS the motion. Too subtle and the sea reads as a painted wall;
+  // too strong and it strobes, which is worse.
+  water:    0x3f6a86,
+  waterAlt: 0x487591,
+  // The quay: wet concrete against the sea rather than the dry kerb inland.
+  quay:     0x8d8377,
+  quayAlt:  0x7e756a,
 };
 
 /**
@@ -264,8 +286,37 @@ export const GOLDEN = {
  * would mean anything reading PAL for a colour could pick one of these up by
  * mistake.
  */
-export function cityTint() {
+export function cityTint(style) {
   const g = themeName() === 'golden';
+  /**
+   * A CONTAINER YARD IS PAINTED, AND A CITY IS NOT.
+   *
+   * This is the one place the Docks needs a genuinely different rule rather
+   * than different numbers on the same rule. A city block is concrete in a
+   * narrow band of cool greys, and the whole reason the city generator uses a
+   * 0.18 hue spread is that anything wider looks like a toy town.
+   *
+   * A yard is the opposite, and it is not an artistic choice — Maersk is blue,
+   * Hapag-Lloyd is orange, Evergreen is green, and the rest are rust red,
+   * grey and white. The hue runs nearly the whole wheel and the saturation is
+   * roughly double, because the colour IS the identifying feature of the
+   * object. A container yard rendered in the city's palette would read as a
+   * housing estate with the roofs off.
+   *
+   * It also does the job the city gets from four building shapes: every box
+   * here is the same box, so colour is the only thing left that stops five
+   * miles of them reading as one repeated texture.
+   */
+  if (style === 'containers') {
+    return {
+      hue: 0.02, hueSpread: 0.92,     // very nearly the whole wheel
+      sat: 0.34, light: 0.34, lightSpread: 0.028,
+      // Rust. Every yard has a row of boxes that have been at sea too long,
+      // and they do the same job the city's black towers do: a dark mass among
+      // the bright ones, so the bright ones read as bright.
+      darkHue: 0.045, darkLight: 0.20,
+    };
+  }
   return {
     hue:        g ? GOLDEN.cityHue : 0.56,
     hueSpread:  g ? GOLDEN.cityHueSpread : 0.18,
@@ -322,19 +373,51 @@ export function flankShade() {
   return themeName() === 'golden' ? GOLDEN.flank : [0.30, 0.32, 0.39];
 }
 
+/**
+ * THE WATER'S TWO BANDS, or null on a track that has no water.
+ *
+ * Night gets values too rather than null, because "the night city has no sea"
+ * is a fact about the TRACK, not about the theme — and a theme that returns
+ * null for a colour forces every caller to branch on it. If a night dockside
+ * ever happens, this is already the right shape.
+ */
+export function waterTint() {
+  const g = themeName() === 'golden';
+  return {
+    a:    g ? GOLDEN.water    : 0x16283c,
+    b:    g ? GOLDEN.waterAlt : 0x1b3047,
+    quay: g ? GOLDEN.quay     : 0x363c44,
+    quayAlt: g ? GOLDEN.quayAlt : 0x3c424b,
+  };
+}
+
 /** The outline colour for the city's ink hulls. See GOLDEN.cityInk. */
 export function cityInk() {
   return themeName() === 'golden' ? GOLDEN.cityInk : 0x0d1119;
 }
 
 /**
- * Which theme the page was opened with. `?theme=golden` and nothing else so
- * far; anything unrecognised is night, because a typo in a query string should
- * give you the game rather than a blank screen.
+ * WHICH THEME, AND IT BELONGS TO THE TRACK NOW.
+ *
+ * It started as `?theme=golden` and nothing else, because a spike wants one
+ * variable and a URL is the cheapest way to have one. That was always going to
+ * become "the track says": the Docks is a golden-hour scene and MIDNIGHT MILE
+ * is not, and asking the player to type a query string to see the right sky is
+ * not a feature.
+ *
+ * THE QUERY STRING STILL WINS WHEN IT IS THERE, and that is deliberate rather
+ * than left over. `?theme=golden` on the night city is the A/B that proved
+ * this palette — same road, same corner, one variable — and tools/daylight.mjs
+ * still runs it on every change. An override that only a harness uses is worth
+ * four lines; rebuilding the A/B rig later would cost far more.
  */
 export function themeName() {
   try {
-    return new URLSearchParams(location.search).get('theme') === 'golden' ? 'golden' : 'night';
+    const q = new URLSearchParams(location.search).get('theme');
+    if (q === 'golden' || q === 'night') return q;
+  } catch (e) { /* fall through to the track */ }
+  try {
+    return currentTrack().theme === 'golden' ? 'golden' : 'night';
   } catch (e) { return 'night'; }
 }
 

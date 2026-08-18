@@ -35,8 +35,9 @@ import { buildBody } from './car/body.js';
 import { buildFurniture } from './world/furniture.js';
 import { buildBarrier } from './world/barrier.js';
 import { buildTunnel } from './world/tunnel.js';
-import { themeColours, themeName, cityTint, tileTint, flankShade, skyStops, cityInk } from './art/theme.js';
+import { themeColours, themeName, cityTint, tileTint, flankShade, skyStops, cityInk, waterTint } from './art/theme.js';
 import { BRIDGE, shapeBridge, inGap, lipDist, gapWidth } from './world/bridge.js';
+import { currentTrack, waterAt } from './world/tracks.js';
 import { buildGantry } from './world/gantry.js';
 // PEDAL_TOP and PEDAL_W come from the cockpit because the cockpit DRAWS the
 // pedal and the boost bottle, and the picture and the hit test have to be the
@@ -134,6 +135,10 @@ const FOG_FAR = SEG_LEN * SEG_COUNT * 0.98;
  * skyline keeps a trace of structure at very low contrast, which is exactly
  * what the drawing has round its vanishing point.
  */
+// THE DEFAULT, AND IT BELONGS TO A TRACK NOW — see src/world/tracks.js. Kept
+// here as the documented night value because the paragraph above is what
+// justifies it, and a number in a config file with no argument attached is a
+// number the next person will change for the wrong reason.
 const FOG_DENSITY = 0.0030;
 
 /**
@@ -503,7 +508,31 @@ const PAL = {
 // Night is the default and stays the shipped look. `?theme=golden` is the
 // spike that answers whether the comic-book style survives daylight, on the
 // track that already exists, before the Docks commits five miles to it.
+/**
+ * WHICH ROAD THIS IS, AND IT IS THE FIRST DECISION THE PROGRAM MAKES.
+ *
+ * Everything downstream bakes from it: the palette below, the scenery's seven
+ * thousand instance colours, the facade or container tile, the barrier's
+ * vertex buffers, and CENTRIFUGAL derived from the worst corner in the
+ * profile. So the choice happens at the top, and the TRACKS menu makes it by
+ * storing and reloading rather than by tearing the world down.
+ *
+ * IT USED TO SIT NEXT TO buildTrack, fifteen hundred lines below, which read
+ * fine and did not work: `const` is hoisted into a temporal dead zone, so the
+ * water and scenery flags up here threw "Cannot read properties of undefined"
+ * at boot and the whole game — BOTH tracks — went blank. A declaration whose
+ * value four other declarations depend on belongs above all four, not beside
+ * the one that reads it last.
+ */
+const TRACK = currentTrack();
+
 Object.assign(PAL, themeColours());
+// AND THEN THE TRACK'S OWN, ON TOP. The theme says what time of day it is; the
+// track says what the ground is made of, and conflating the two put a strip of
+// sunlit lawn between the tarmac and the sea on the first Docks build. Applied
+// after the theme so a track can override a themed colour, which is the way
+// round that lets one more track exist without a new mechanism.
+if (TRACK.colours) Object.assign(PAL, TRACK.colours);
 
 // ------------------------------------------------------------------ helpers
 
@@ -541,7 +570,7 @@ function mark(attr, count) {
  * units per segment; elevation is world units. Both are smoothed, because a
  * step change in either reads as a kink rather than a corner.
  */
-function buildTrack(n, seed) {
+function buildTrack(n, seed, P) {
   let s = seed >>> 0;
   const rnd = () => {
     // xorshift32 — small, fast, good enough, and deterministic across machines
@@ -576,17 +605,24 @@ function buildTrack(n, seed) {
   let elev = 0;
   let i = 0;
   while (i < n) {
+    // THE DRAW ORDER IS PART OF THE TRACK. Every branch below pulls the same
+    // number of values in the same sequence it always did, and the profile
+    // only scales what they become — because the road is a seeded xorshift, so
+    // one extra rnd() call anywhere reshapes every corner after it and a
+    // finished track quietly becomes a different one. See src/world/tracks.js.
     const kind = rnd();
-    const len = 40 + Math.floor(rnd() * 90);
+    const len = P.lenMin + Math.floor(rnd() * P.lenVar);
     let c = 0;
-    if (kind < 0.34) { c = 0; }                                  // straight
-    else if (kind < 0.72) { c = (rnd() * 2 - 1) * 0.055; }        // bend
-    else { c = (rnd() < 0.5 ? -1 : 1) * (0.075 + rnd() * 0.05); } // hard corner
+    if (kind < P.straightP) { c = 0; }                                        // straight
+    else if (kind < P.bendP) { c = (rnd() * 2 - 1) * P.bendMax; }             // bend
+    else { c = (rnd() < 0.5 ? -1 : 1) * (P.hardMin + rnd() * P.hardVar); }    // hard corner
 
     // Where the road is heading. Bounded, or a random walk wanders off into
     // the sky and the fog has nothing left to hide.
     let target = elev;
-    if (rnd() < 0.62) target = clamp(elev + (rnd() * 2 - 1) * 30, -55, 55);
+    if (rnd() < P.hillP) {
+      target = clamp(elev + (rnd() * 2 - 1) * P.hillVar, -P.hillClamp, P.hillClamp);
+    }
 
     for (let k = 0; k < len && i < n; k++, i++) {
       // ease in and out of the feature so corners have entry and exit
@@ -890,13 +926,29 @@ class Road {
       // which is where peripheral vision reads speed from — a single flat colour
       // out there has nothing moving in it. Kept deliberately subtle: strong
       // bands in the periphery strobe rather than flow.
+      // THE SEA IS THESE SAME TWO QUADS WITH A DIFFERENT COLOUR IN THEM.
+      //
+      // That is the entire water feature, and it is why water was the right
+      // choice for the Docks rather than an expensive one: no new geometry, no
+      // new draw call, no second mesh to keep in step with a road that
+      // undulates. It also REPLACES what would otherwise be there — a bank of
+      // instanced container stacks — so a water stretch is cheaper than a land
+      // one, not dearer.
+      //
+      // `w` is 0 for none, -1 or +1 for one side, 2 for both, which is the
+      // causeway. Read per segment, and skipped entirely on a track with no
+      // water at all.
       const ground = alt ? PAL.grass : PAL.grassAlt;
+      const w = WATER_ON ? waterAt(TRACK, a) : 0;
+      const wet = alt ? WATER.a : WATER.b;
+      const gl = (w === -1 || w === 2) ? wet : ground;
+      const gr = (w === 1 || w === 2) ? wet : ground;
       this._quad(q++,
         x1 - ROAD_W - GRASS_W, y1, z1, x2 - ROAD_W - GRASS_W, y2, z2,
-        x2 - ROAD_W - vw, y2, z2, x1 - ROAD_W - vw, y1, z1, ground, shade);
+        x2 - ROAD_W - vw, y2, z2, x1 - ROAD_W - vw, y1, z1, gl, shade);
       this._quad(q++,
         x1 + ROAD_W + vw, y1, z1, x2 + ROAD_W + vw, y2, z2,
-        x2 + ROAD_W + GRASS_W, y2, z2, x1 + ROAD_W + GRASS_W, y1, z1, ground, shade);
+        x2 + ROAD_W + GRASS_W, y2, z2, x1 + ROAD_W + GRASS_W, y1, z1, gr, shade);
     }
 
     this.posAttr.needsUpdate = true;
@@ -967,6 +1019,27 @@ class Posts {
 // never be left over from the wrong time of day. Found by the positive control
 // in tools/nightsame.mjs rather than by eye — see the note in theme.js.
 const CITY_INK = cityInk();
+
+/**
+ * THE SEA, resolved once at boot like everything else that is a colour.
+ *
+ * `WATER_ON` is the whole of the cost when a track has no water: one boolean
+ * tested per segment instead of a function call and a loop over ranges. The
+ * night city pays that and nothing else.
+ */
+const WATER = waterTint();
+const WATER_ON = !!(TRACK.water && TRACK.water.length);
+
+/**
+ * IS THE SCENERY A CONTAINER YARD RATHER THAN A CITY.
+ *
+ * One flag, read in three places: the facade tile, the shape table and the
+ * colour table. Everything else about Scenery — the instancing, the ink hull,
+ * the row stacking, the distance flattening, the load dial — is the same code
+ * doing the same work, which is the reason the Docks can have five miles of
+ * yard for no new draw calls and no new system.
+ */
+const YARD = TRACK.scenery === 'containers';
 
 /**
  * WHAT YOU SEE THROUGH THE BROKEN BRIDGE. Darker than the city ink and a touch
@@ -1352,6 +1425,104 @@ function windowTexture(size = 256, seed = 0xbeef) {
 }
 
 /**
+ * A SHIPPING CONTAINER'S SIDE, which is a much simpler drawing than a facade.
+ *
+ * The same job as windowTexture(), for the Docks. Every argument in that
+ * function's header about ink weight and stroke width applies here — the
+ * difference is what the strokes ARE. A facade is windows: small closed shapes
+ * in a grid. A container is CORRUGATION: one repeated vertical rib, top to
+ * bottom, edge to edge, with a rail across the top and bottom and a big flat
+ * placard where a shipping line's name goes.
+ *
+ * THAT MAKES IT CHEAPER AND MORE LEGIBLE AT DISTANCE. The facade tile spends
+ * its ink on a seven-by-four grid of windows, most of which land under two
+ * pixels once a building is a hundred units away. A rib is a full-height line,
+ * so it survives being small: a container stack at the vanishing point is
+ * still visibly ribbed when a building at the same distance is a grey smear.
+ * Which is the right way round for a yard, because a yard is thousands of
+ * identical boxes and the ribs are the only thing telling you so.
+ *
+ * NEUTRAL, LIKE THE FACADE TILE. The instance tint carries the colour — and on
+ * a container yard that tint is doing far more work than it does in a city,
+ * because containers are PAINTED. See cityTint's container branch.
+ */
+function containerTexture(size = 256) {
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const x = c.getContext('2d');
+  const T = tileTint();
+
+  x.fillStyle = T.pier;
+  x.fillRect(0, 0, size, size);
+
+  const B = Math.max(2, Math.round(size * 0.016));      // the ink frame
+  const inner = size - 2 * B;
+  const hair = Math.max(1, Math.round(size * 0.008));
+
+  // ---- the rails ----------------------------------------------------------
+  // A container is a steel box with a heavy rail top and bottom and the thin
+  // corrugated skin between. The rails are what stop a stack reading as one
+  // tall ribbed wall: they draw the horizontal line between one box and the
+  // next, which is the only thing that says how many are stacked.
+  const rail = Math.max(3, Math.round(inner * 0.085));
+  x.fillStyle = T.slab;
+  x.fillRect(B, B, inner, rail);
+  x.fillRect(B, size - B - rail, inner, rail);
+  x.fillStyle = T.lip;
+  x.fillRect(B, B + rail - hair, inner, hair);          // the lit lip under the top rail
+  x.fillStyle = T.ink;
+  x.fillRect(B, B + rail, inner, hair);
+  x.fillRect(B, size - B - rail - hair, inner, hair);
+
+  // ---- the corrugation ----------------------------------------------------
+  // EIGHTEEN RIBS, and the number is chosen the same way the facade's seven
+  // bays were: by what a rib is worth in pixels. A near container is 90-200
+  // screen pixels across, so eighteen puts a rib every 5-11px — wide enough
+  // that the ink line and the lit edge beside it are both a real pixel, which
+  // is what makes it read as a fold rather than as a hatch.
+  const RIBS = 18;
+  const rw = inner / RIBS;
+  const y0 = B + rail, y1 = size - B - rail;
+  for (let r = 0; r < RIBS; r++) {
+    const rx = B + r * rw;
+    // Each rib is a shadowed valley and a lit crest, in that order, so the
+    // light direction across a container agrees with the one baked into the
+    // building flanks. Two rectangles a rib; no gradients anywhere.
+    x.fillStyle = T.shadow;
+    x.fillRect(Math.round(rx), y0, Math.max(1, Math.round(rw * 0.34)), y1 - y0);
+    x.fillStyle = T.lip;
+    x.fillRect(Math.round(rx + rw * 0.34), y0, Math.max(1, hair), y1 - y0);
+  }
+
+  // ---- the placard --------------------------------------------------------
+  // The flat panel a shipping line paints its name on, and the reason it is
+  // here is compositional rather than literal: eighteen ribs edge to edge is a
+  // texture with no focus, and one plain rectangle interrupting them is what
+  // makes the eye read a box instead of a barcode.
+  const pw = Math.round(inner * 0.42), ph = Math.round((y1 - y0) * 0.30);
+  const px0 = Math.round(B + inner * 0.30), py0 = Math.round(y0 + (y1 - y0) * 0.22);
+  x.fillStyle = T.pier;
+  x.fillRect(px0, py0, pw, ph);
+  x.fillStyle = T.ink;
+  x.fillRect(px0, py0, pw, hair);
+  x.fillRect(px0, py0 + ph - hair, pw, hair);
+  x.fillRect(px0, py0, hair, ph);
+  x.fillRect(px0 + pw - hair, py0, hair, ph);
+
+  // The frame last, so nothing above can overwrite it.
+  x.fillStyle = T.ink;
+  x.fillRect(0, 0, size, B);
+  x.fillRect(0, size - B, size, B);
+  x.fillRect(0, 0, B, size);
+  x.fillRect(size - B, 0, B, size);
+
+  const t = new CanvasTexture(c);
+  t.wrapS = t.wrapT = RepeatWrapping;
+  t.colorSpace = SRGBColorSpace;
+  return t;
+}
+
+/**
  * THE CITY, AND THE INK AROUND IT.
  *
  * THE LOAD DIAL. This exists so the breaking point is FOUND rather than
@@ -1528,7 +1699,11 @@ class Scenery {
     // So it is only safe to turn back on because _shell WRITES that attribute.
     // If you change the geometry, check it still does.
     const mat = new MeshBasicMaterial({
-      vertexColors: true, fog: true, map: windowTexture(),
+      // WHICH TILE, from the track. A city gets windows and a yard gets
+      // corrugation; both are one 256px canvas painted at boot and neither
+      // costs a byte of download.
+      vertexColors: true, fog: true,
+      map: YARD ? containerTexture() : windowTexture(),
       // DOUBLE SIDED because half the instances are MIRRORED. A negative X
       // scale reverses the winding of every triangle, so back-face culling
       // would throw away exactly the faces we built. There is no extra
@@ -1601,7 +1776,7 @@ class Scenery {
         // of on a lucky hash, and it is the single biggest contributor to the
         // long runs the near field was missing.
         const h = (i * 0.113) % 1;
-        const T = cityTint();
+        const T = cityTint(TRACK.scenery);
         this.c.setHSL(T.darkHue + h * 0.10, 0.30, T.darkLight + ((i * 11) % 3) * 0.022);
       } else {
         // Buildings: cool, dark, and varied enough that the eye does not
@@ -1621,7 +1796,7 @@ class Scenery {
         // changed the sky and left the city exactly as dark as it was at
         // night. PAL.wall was never what coloured a building.
         const h = (i * 0.113) % 1;
-        const T = cityTint();
+        const T = cityTint(TRACK.scenery);
         this.c.setHSL(T.hue + h * T.hueSpread, T.sat + ((i * 5) % 4) * 0.05,
                       T.light + ((i * 7) % 8) * T.lightSpread);
       }
@@ -1653,7 +1828,7 @@ class Scenery {
     let sd = 0x1234567;
     const r = () => { sd ^= sd << 13; sd >>>= 0; sd ^= sd >> 17; sd ^= sd << 5; sd >>>= 0; return sd / 4294967296; };
     for (let i = 0; i < max; i++) {
-      const sign = i % 12 === 5;
+      const sign = !YARD && i % 12 === 5;
       const o = i * 6;
       this.spec[o] = r() < 0.5 ? -1 : 1;
       // Signs are small and thin; buildings are big blocks. Rolling the random
@@ -1668,6 +1843,43 @@ class Scenery {
         this.spec[o + 5] = 0;
         continue;
       }
+      // ---- A CONTAINER YARD IS ONE SHAPE, AND THAT IS THE POINT -----------
+      //
+      // The city's four kinds exist because a street of one average building
+      // repeated with a wobble reads as a bug. A yard is the opposite: every
+      // container on earth is the same box, and getting that WRONG — varying
+      // the size — is what would read as a bug. So the variation goes entirely
+      // into how they are STACKED and what colour they are painted.
+      //
+      // THE LONG AXIS RUNS ALONG THE ROAD, and that is the whole composition.
+      // `w` is lateral and `dep` runs into the screen, so a 5.7 x 14.2 box
+      // gives a narrow end pointing at the camera and a long side facing the
+      // road — which is exactly a yard seen from a road beside it: rows running
+      // away from you, door ends toward you, and an aisle between each row
+      // because 5.7 of container in an 11-unit row spacing leaves 5.3 of gap.
+      // The other way round, a 14-unit lateral box in an 11-unit row spacing
+      // would overlap its neighbour behind and the aisles would close up.
+      //
+      // The numbers are real, through the game's own scale of 1 unit = 0.43m:
+      // 2.44m wide is 5.7, 2.6m high is 6.0, a 20ft box is 14.2 long and a
+      // 40ft is 28.3. Stacks run one to four high, which is what a yard with
+      // working reach stackers looks like.
+      if (YARD) {
+        this.spec[o + 1] = 5.7;
+        this.spec[o + 2] = 6.0;
+        this.spec[o + 3] = a3 < 0.62 ? 14.2 : 28.3;    // mostly 20ft, some 40ft
+        // Weighted low. A yard that is four high everywhere is a wall and you
+        // can see nothing over it; the cranes and the ships are supposed to be
+        // the skyline, so the boxes have to let them through.
+        this.spec[o + 4] = a5 < 0.30 ? 1 : a5 < 0.62 ? 2 : a5 < 0.87 ? 3 : 4;
+        // NO TAPER. A stack of containers is vertical — and taper 0 also opts
+        // out of the "taller further from the road" rule that gives the city
+        // its skyline, which is correct here for the same reason: a yard is
+        // flat-topped, and pretending otherwise would hide the cranes.
+        this.spec[o + 5] = 0;
+        continue;
+      }
+
       // FOUR KINDS OF BUILDING, NOT ONE SHAPE WITH FIVE RANDOM NUMBERS.
       //
       // Width, depth, height and stack were each drawn independently and
@@ -1841,6 +2053,20 @@ class Scenery {
         const sl = this._slot(a, rrow + sub * 97);
         const o = sl * 6;
         const side = this.spec[o];
+        // NOTHING STANDS IN THE SEA.
+        //
+        // The side a building sits on is baked per slot, so a water stretch has
+        // to drop the ones facing it at placement time. They fall through to
+        // the parking loop at the bottom, which already exists for exactly this
+        // shape of shortfall — so this is a `continue` and not a system.
+        //
+        // 2 is the causeway, where both sides are water and nothing is placed
+        // at all. That stretch draws its half of the frame from two ground
+        // quads and the sky, which is the cheapest scenery in the game.
+        if (WATER_ON) {
+          const ws = waterAt(TRACK, a);
+          if (ws === 2 || ws === side) continue;
+        }
         const w0 = this.spec[o + 1], bh = this.spec[o + 2], d0 = this.spec[o + 3];
         // THE CITY GETS TALLER AWAY FROM THE ROAD, and that is the fix for the
         // vanishing point being mostly sky.
@@ -2106,17 +2332,17 @@ function skyTexture() {
   return t;
 }
 scene.background = skyTexture();
-scene.fog = new FogExp2(PAL.haze, FOG_DENSITY);
+scene.fog = new FogExp2(PAL.haze, TRACK.fog);
 
 const camera = new PerspectiveCamera(72, 1, 0.5, FOG_FAR + SEG_LEN * 8);
 
-const track = buildTrack(4000, 0x9e3779b9);
+const track = buildTrack(TRACK.segments, TRACK.seed, TRACK.profile);
 // THE BROKEN BRIDGE, added into the elevation before anything reads it. It has
 // no mesh of its own: the road, the barrier, the pavement and the camera all
 // draw from track.hill and therefore all climb over the arch without a line of
 // code about it. See src/world/bridge.js for why the missing span is a separate
 // flag rather than a hole in the hill.
-shapeBridge(track, SEG_LEN);
+if (TRACK.bridge) shapeBridge(track, SEG_LEN);
 const handling = deriveHandling(track);
 CENTRIFUGAL = handling.cent;
 
@@ -2150,7 +2376,10 @@ const road = new Road(scene);
 // went 0.66 to 1.18, and the outer fifth of the screen went from 0.3% covered
 // to 5.3%. `PROF.posts` still times the right thing because the name did not
 // change. See the head of barrier.js for what is and is not proven about it.
-const posts = buildBarrier({ scene, palette: PAL, ink: INK, roadW: ROAD_W,
+// `scene: null` on a track without one — buildBarrier already answers with a
+// do-nothing stub of the same shape, so there is no branch anywhere else.
+const posts = buildBarrier({ scene: TRACK.barrier ? scene : null,
+                             palette: PAL, ink: INK, roadW: ROAD_W,
                              segLen: SEG_LEN, segCount: SEG_COUNT, behind: BEHIND });
 // 120,000. The dial has now been raised twice for the same reason: it kept
 // running out before the phone did. 4,000 had no effect; 20,000 had no effect
@@ -2214,8 +2443,13 @@ const SCENERY_START = 3500;
  * The start line sits at RACE_FROM. Everything else — the finish gantry, the
  * timing, the banner placement — is derived, so moving the race is one number.
  */
-const RACE_FROM = 600;          // where the start gantry stands, in world units
-const RACE_LEN = 12000;         // and how far it is to the finish
+// FROM THE TRACK. 600 / 12,000 for the night city, which is what these were
+// when they were literals; the Docks is the same start line and 18,900 units
+// to the flag. Length costs nothing per frame — the road only ever builds the
+// 220 segments ahead of you — so a longer lap is more variety to fill and no
+// more work to draw.
+const RACE_FROM = TRACK.from;   // where the start gantry stands, in world units
+const RACE_LEN = TRACK.len;     // and how far it is to the finish
 const COUNTDOWN = 3.2;          // seconds of lights before the throttle is live
 /**
  * HOW FAR BEHIND THE ARCH THE CAR SITS ON THE GRID.
@@ -2287,7 +2521,14 @@ const race = {
  * exists now. Not built yet, deliberately: there is one track, and a per-track
  * store with one entry in it is a guess about a shape that has not turned up.
  */
-const BEST_KEY = 'svu-racer-best-v2';
+// A KEY PER TRACK, WHICH IS WHAT THE COMMENT ABOVE SAID IT WOULD BECOME. The
+// old note deferred this on the grounds that "a per-track store with one entry
+// in it is a guess about a shape that has not turned up". The Docks is the
+// shape turning up, and the answer was the simplest one available: the track
+// owns its key, so two tracks cannot see each other's times and neither can a
+// future third. No migration — 'svu-racer-best-v2' is unchanged, so every lap
+// Anthony has driven is still there under the same name.
+const BEST_KEY = TRACK.bestKey;
 function loadBests() {
   try {
     const raw = localStorage.getItem(BEST_KEY);
@@ -2416,7 +2657,8 @@ scenery.count = SCENERY_START;
 // Street furniture: lampposts, signals, crossings, railings. A stub until it
 // is built, so the game runs identically until it draws its first triangle.
 const furniture = buildFurniture({
-  scene, palette: PAL, ink: INK, roadW: ROAD_W, segLen: SEG_LEN, segCount: SEG_COUNT,
+  scene: TRACK.furniture ? scene : null,
+  palette: PAL, ink: INK, roadW: ROAD_W, segLen: SEG_LEN, segCount: SEG_COUNT,
 });
 // The start and finish gantries, with the SVU branding. ONE set of geometry
 // serving both lines — they are RACE_LEN apart and the road is 1,350 units
@@ -2433,8 +2675,15 @@ const gantry = buildGantry({
 // It costs one draw call while it is on screen and nothing when it is not, and
 // the finish gantry — the frame that sets the worst-case budget — is 500
 // segments away, so the two can never be drawn together.
-const tunnel = buildTunnel({ scene, palette: PAL, ink: INK, roadW: ROAD_W,
-                             segLen: SEG_LEN, segCount: SEG_COUNT, behind: BEHIND });
+const tunnel = TRACK.tunnel
+  ? buildTunnel({ scene, palette: PAL, ink: INK, roadW: ROAD_W,
+                  segLen: SEG_LEN, segCount: SEG_COUNT, behind: BEHIND })
+  // A STUB WITH THE SAME SHAPE, not a null. Six places ask the tunnel whether
+  // the car is inside it — the audio's reverb, the stray limit, the headlight
+  // wash — and every one of them would need a guard. A tunnel that is never
+  // anywhere answers all six correctly and costs one object.
+  : { mesh: null, inside: () => false, enclosure: () => 0,
+      update: () => {}, stats: () => ({ calls: 0, tris: 0 }) };
 // One texture for the whole game. Generated at startup from a few hundred
 // bytes of canvas drawing, never downloaded.
 const PENCIL = pencilTexture(128);

@@ -311,6 +311,10 @@
        — see TILT_NOTE in src/ui/menu.js. Amber rather than red: nothing is
        broken, there is just something to do. */
     .sNote.sWarn { color: #e8b23c; }
+    /* The track you are already on. Dimmed rather than hidden — a disabled
+       button that still reads DRIVING tells you where you are; removing it
+       leaves a gap you have to interpret. */
+    .mB.trkHere { opacity: .55; }
   .sCtl { display: flex; align-items: center; gap: 1.2vmin; flex: none; }
   .sSw { min-width: max(56px, 12vmin); }
   .sSw.on { background: #2f7d1acc; border-color: #8ee23f; }

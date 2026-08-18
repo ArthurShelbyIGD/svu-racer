@@ -15,7 +15,14 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const FILE = 'file://' + join(ROOT, 'docs', 'index.html');
+// EVERY CHECK IN HERE IS ABOUT A TRACK — the corner margins, the elevation
+// cliffs, the autopilot, the draw-call budget — and there is more than one
+// track now. Passing on MIDNIGHT MILE says nothing about the Docks, and the
+// checks that matter most are exactly the ones a new road can break.
+//   node tools/check.mjs            the night city
+//   node tools/check.mjs docks      the Docks
+const TRACK = process.argv[2] || '';
+const FILE = 'file://' + join(ROOT, 'docs', 'index.html') + (TRACK ? '?track=' + TRACK : '');
 
 const fails = [];
 const ok = (cond, label, detail = '') => {

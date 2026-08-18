@@ -611,11 +611,25 @@ function buildTrack(n, seed, P) {
     // one extra rnd() call anywhere reshapes every corner after it and a
     // finished track quietly becomes a different one. See src/world/tracks.js.
     const kind = rnd();
-    const len = P.lenMin + Math.floor(rnd() * P.lenVar);
+    const base = P.lenMin + Math.floor(rnd() * P.lenVar);
     let c = 0;
-    if (kind < P.straightP) { c = 0; }                                        // straight
-    else if (kind < P.bendP) { c = (rnd() * 2 - 1) * P.bendMax; }             // bend
-    else { c = (rnd() < 0.5 ? -1 : 1) * (P.hardMin + rnd() * P.hardVar); }    // hard corner
+    let len = base;
+    if (kind < P.straightP) {
+      c = 0;
+      // A STRAIGHT AND A CORNER WANT DIFFERENT LENGTHS, and one range for both
+      // is what made the Docks lazy. The same curvature stretched over two
+      // hundred segments is a sweeper you hold the wheel through; over fifty it
+      // is a corner you have to arrive at properly. Scaling the length AFTER
+      // the draw keeps the xorshift sequence identical, so the night city —
+      // whose multipliers are 1 — cannot move.
+      len = Math.round(base * P.lenStraight);
+    } else if (kind < P.bendP) {
+      c = (rnd() * 2 - 1) * P.bendMax;                                        // bend
+      len = Math.round(base * P.lenCorner);
+    } else {
+      c = (rnd() < 0.5 ? -1 : 1) * (P.hardMin + rnd() * P.hardVar);           // hard corner
+      len = Math.round(base * P.lenCorner);
+    }
 
     // Where the road is heading. Bounded, or a random walk wanders off into
     // the sky and the fog has nothing left to hide.
@@ -1040,6 +1054,9 @@ const WATER_ON = !!(TRACK.water && TRACK.water.length);
  * yard for no new draw calls and no new system.
  */
 const YARD = TRACK.scenery === 'containers';
+
+/** How far off the road edge the first row of scenery stands. See tracks.js. */
+const SCENERY_OFF = TRACK.sceneryOff;
 
 /**
  * WHAT YOU SEE THROUGH THE BROKEN BRIDGE. Darker than the city ink and a touch
@@ -2090,7 +2107,10 @@ class Scenery {
         // than a fifth field in the table.
         const taper = this.spec[o + 5];
         const blocks = this.spec[o + 4] + (taper > 0 ? rrow >> 1 : 0);
-        const off = ROAD_W + 8 + rrow * 11 + (sl % 3) * 2.5;
+        // FROM THE TRACK. The city wants its street wall close; the container
+        // yard wants an apron in front of it, and that difference turned out
+        // to be the whole of the Docks flicker. See tracks.js's sceneryOff.
+        const off = ROAD_W + SCENERY_OFF + rrow * 11 + (sl % 3) * 2.5;
         const px = SX[i] + side * off;
         // MIRROR BY WHERE IT ACTUALLY IS, not by which side of the road it was
         // assigned to. The geometry only has the flank facing -X, so it has to

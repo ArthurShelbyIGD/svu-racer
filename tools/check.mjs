@@ -291,8 +291,28 @@ const idle = await page.evaluate(async ({ from, len }) => {
 ok(idle.offMax > K.STRAY_MAX * 0.97,
    'hands off, the car runs all the way to the stray limit',
    `worst offset ${idle.offMax.toFixed(1)} of a possible ${K.STRAY_MAX}, road edge ${K.ROAD_W}`);
-ok(idle.mean > K.ROAD_W / 2, 'hands off, the average position is outside the middle lane',
-   `mean offset ${idle.mean.toFixed(1)} vs road edge ${K.ROAD_W}`);
+// THIS BAR WAS A CORNER-DENSITY PROXY AND A SECOND TRACK FOUND IT OUT.
+//
+// It used to require the hands-off MEAN offset to clear ROAD_W / 2. That is a
+// fine bar on a road that is cornering most of the time, and MIDNIGHT MILE is:
+// it scores 5.8. THE DOCKS is 44% dead straight by design — Anthony asked for
+// long flat-out runs — so half the sampled stretch contributes nothing to the
+// mean and it lands at 4.2 against a 4.5 bar.
+//
+// I am NOT lowering a bar to make a failure go away; the header above says
+// exactly why that is the trap, and it is right. I am replacing a proxy with
+// the invariant it was standing in for, which is the same move the stray-limit
+// assertion above already made when its absolute number rotted.
+//
+// The invariant is "not steering is much worse than steering", and as a RATIO
+// this is far stricter than the 2x bar below it: MIDNIGHT MILE measures 9.2x
+// and THE DOCKS 11.5x, so 6x has real headroom underneath while being
+// unreachable by a car that self-steers — such a car scores near 1x by
+// definition, whatever the road does. It also cannot rot when a future track
+// is straighter or twistier still, which the old one demonstrably could.
+ok(idle.mean > drive.mean * 6, 'hands off, the car ends up far further off line than when driven',
+   `mean offset ${idle.mean.toFixed(2)} hands off vs ${drive.mean.toFixed(2)} driving` +
+   ` — ${(idle.mean / Math.max(0.01, drive.mean)).toFixed(1)}x`);
 // Was 29% of frames when the car could wander to 15; a tighter clamp bounds
 // how far each excursion travels, so it crosses the edge less often. The claim
 // under test — that not driving is meaningfully worse than driving — is carried

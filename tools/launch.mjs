@@ -32,7 +32,15 @@ const b = await chromium.launch({
   args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--disable-dev-shm-usage'],
 });
 const p = await b.newPage({ viewport: { width: 400, height: 240 } });
-await p.goto('file://' + __j(ROOT, 'docs', 'index.html'), { waitUntil: 'load' });
+// PER TRACK, because "how much of the lap is already flat out" is the closest
+// thing this project has to a measurement of whether a road ASKS ANYTHING OF
+// YOU. Anthony on the first drivable Docks: "The track feels a bit lazy tbh."
+// That is a real report and it deserves a number rather than a taste argument.
+//   node tools/launch.mjs            MIDNIGHT MILE
+//   node tools/launch.mjs docks      THE DOCKS
+const TRACK = process.argv[2] || '';
+await p.goto('file://' + __j(ROOT, 'docs', 'index.html') + (TRACK ? '?track=' + TRACK : ''),
+             { waitUntil: 'load' });
 await p.waitForFunction(() => window.RACER, null, { timeout: 30000 });
 await p.evaluate(() => { window.RACER.menu.close(); window.RACER.renderer.setPixelRatio(0.3); });
 await p.waitForTimeout(500);
@@ -100,8 +108,46 @@ const r = await p.evaluate(async () => {
     requestAnimationFrame(step);
   });
   R.tune.holdX = null;
+
+  // ---- 3. WHAT THE ROAD ACTUALLY ASKS OF YOU -----------------------------
+  //
+  // "Lazy" is a real report and it needs a real number. The two measurements
+  // above cannot give one: this harness drives pinned to the centre line, so it
+  // never loses a mile an hour to a corner however sharp, and "% at the
+  // ceiling" therefore measures HILLS rather than corners. The night city
+  // scored 65% and the Docks 77% almost entirely because one has elevation and
+  // the other does not — which is a true fact about the two roads and NOT the
+  // thing Anthony was describing.
+  //
+  // What a corner costs a real driver is lock and a line. So count them: how
+  // many, how long each lasts, and how much of the worst-case lock each
+  // demands. Three long sweepers and eight short corners can score identically
+  // on speed and feel completely different, and that difference is this.
+  const seg = R.consts.SEG_LEN, from = R.consts.RACE_FROM, rlen = R.consts.RACE_LEN;
+  const s0 = Math.floor(from / seg), s1 = Math.floor((from + rlen) / seg);
+  const cur = R.track.curve;
+  let worst = 0;
+  for (let i = s0; i < s1; i++) { const c = Math.abs(cur[i]); if (c > worst) worst = c; }
+  // A "corner" is a run of segments above 55% of the worst curvature on THIS
+  // track. Relative rather than absolute, because CENTRIFUGAL is calibrated to
+  // the worst corner — so 0.09 curvature means something different on each road.
+  const GATE = worst * 0.55;
+  const corners = [];
+  let run = 0, peak = 0;
+  for (let i = s0; i <= s1; i++) {
+    const c = i < s1 ? Math.abs(cur[i]) : 0;
+    if (c >= GATE) { run++; if (c > peak) peak = c; }
+    else if (run) { corners.push({ segs: run, peak }); run = 0; peak = 0; }
+  }
+  // The other half of what makes a lap interesting is contrast: the longest
+  // run where you are doing nothing but holding it flat.
+  let straight = 0, longest = 0;
+  for (let i = s0; i < s1; i++) {
+    if (Math.abs(cur[i]) < worst * 0.15) { straight++; if (straight > longest) longest = straight; }
+    else straight = 0;
+  }
   return { marks, bins, lapT, atCap, cap: CAP * MPH, MPH,
-           len: R.consts.RACE_LEN, seg: R.consts.SEG_LEN };
+           len: rlen, seg, corners, worst, longest, laps: s1 - s0 };
 });
 await b.close();
 
@@ -148,5 +194,25 @@ console.log(`   There, boost pays by RAISING the ceiling (x${1.35} = ${(r.cap * 
 console.log(`   The other ${(100 * (1 - r.atCap / total)).toFixed(0)}% is below it, and there boost pays by`);
 console.log(`   ACCELERATING harder (x1.9) to get back to speed sooner.`);
 console.log(`   Which of the two buys more per second of bottle is still unmeasured.\n`);
+// ---- WHAT THE ROAD ASKS --------------------------------------------------
+console.log('\n  WHAT THE ROAD ASKS OF YOU\n');
+const secsPer = (segs) => segs * r.seg / (r.cap / 0.9633);
+const inCorners = r.corners.reduce((a, c) => a + c.segs, 0);
+console.log(`   ${r.corners.length} corners in ${(r.len * (1.55 / 3.6) / 1609.344).toFixed(2)} miles` +
+            `  (a corner is anything over 55% of this track's worst curvature)`);
+console.log(`   worst curvature ${r.worst.toFixed(4)}`);
+console.log(`   ${(100 * inCorners / r.laps).toFixed(0)}% of the lap is INSIDE one, ` +
+            `about ${secsPer(inCorners).toFixed(0)}s of a ${r.lapT.toFixed(0)}s lap`);
+console.log(`   average corner ${(inCorners / Math.max(1, r.corners.length)).toFixed(0)} segments, ` +
+            `${secsPer(inCorners / Math.max(1, r.corners.length)).toFixed(1)}s at the cap`);
+console.log(`   longest flat-out run ${r.longest} segments, ` +
+            `${(r.longest * r.seg * (1.55 / 3.6) / 1609.344).toFixed(2)} miles, ` +
+            `${secsPer(r.longest).toFixed(1)}s`);
+console.log('');
+console.log('   A corner you are in for under two seconds is an EVENT: an entry, an');
+console.log('   apex and an exit. One you are in for six is a section you hold the');
+console.log('   wheel through, and enough of those in a row is what "lazy" means.');
+console.log('');
+
 console.log(`   Anthony's 57.1 against a no-boost ${r.lapT.toFixed(1)}: ` +
             `the bottle is already worth ${(r.lapT - 57.1).toFixed(1)}s a lap.\n`);

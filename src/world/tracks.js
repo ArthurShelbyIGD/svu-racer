@@ -59,6 +59,10 @@ const PROFILE = {
   hillP: 0.62,        // how often a feature also changes height
   hillVar: 30,        // by up to this much, either way
   hillClamp: 55,      // and never outside this band
+  // Straights and corners were one length range until the Docks proved that
+  // was wrong. 1 and 1 reproduce exactly what the night city always did.
+  lenStraight: 1,
+  lenCorner: 1,
 };
 
 export const TRACKS = {
@@ -85,6 +89,9 @@ export const TRACKS = {
     bridge: true,
     tunnel: true,
     scenery: 'city',
+    // How far off the road edge the first row stands. The city's street wall
+    // is close, which is what makes it a street.
+    sceneryOff: 8,
     barrier: true,
     furniture: true,
     fog: 0.0030,
@@ -127,15 +134,45 @@ export const TRACKS = {
     from: 600,
     len: 18900,
     bestKey: 'svu-racer-docks-v1',
+    /**
+     * REWRITTEN AFTER ANTHONY DROVE IT: "the track feels a bit lazy tbh."
+     *
+     * He was right and the arithmetic says exactly how right. The first
+     * profile made features LONG (70-200 segments) and hard corners RARE (14%
+     * of them), which over 3,150 segments works out at about twenty-three
+     * features and THREE HARD CORNERS IN FIVE MILES — every one of them a long
+     * constant-radius sweeper you hold the wheel through. tools/launch.mjs
+     * measured the consequence: 77% of the lap at the unboosted ceiling
+     * against the night city's 65%, and the corners costing about half a
+     * second over the whole lap.
+     *
+     * The mistake was reading "long straights" as "long everything". A dock
+     * road is long runs between RIGHT-ANGLE junctions, not one endless curve,
+     * and that contrast is the thing worth having:
+     *
+     *   STRAIGHTS DOUBLE IN LENGTH. Real flat-out runs where the only
+     *   decision is the bottle.
+     *   CORNERS DROP TO TWO THIRDS. A corner is now about 55 segments — a
+     *   second and a half at speed — so it is an event with an entry and an
+     *   exit rather than a section.
+     *   AND THERE ARE TWICE AS MANY. 32% hard against 14%, which is eight real
+     *   corners a lap instead of three.
+     *
+     * The corners are also SHARPER than the city's now. That does not by
+     * itself make them harder — CENTRIFUGAL is derived from the worst corner,
+     * so the worst corner on any track always demands about the same lock —
+     * but it does mean more of these corners sit near that worst case instead
+     * of well under it.
+     */
     profile: {
       ...PROFILE,
-      straightP: 0.50,   // half of it, against the city's third
-      bendP: 0.86,       // and most of the rest is a long open bend
-      bendMax: 0.040,
-      hardMin: 0.058,    // the hardest corner here is milder than the city's mildest hard one
-      hardVar: 0.030,
-      lenMin: 70,        // longer features: fewer, bigger gestures over five miles
-      lenVar: 130,
+      straightP: 0.44,
+      bendP: 0.68,       // so 24% gentle bends and 32% hard corners
+      bendMax: 0.050,
+      hardMin: 0.085,
+      hardVar: 0.055,
+      lenStraight: 2.0,  // long runs
+      lenCorner: 0.65,   // short, sharp corners between them
       hillP: 0.45,
       hillVar: 7,        // sea level, give or take a quayside
       hillClamp: 9,
@@ -145,6 +182,28 @@ export const TRACKS = {
     // The same instancer, the same draw calls, different boxes. See the
     // container branches in main.js's Scenery and containerTexture().
     scenery: 'containers',
+
+    /**
+     * THE YARD STANDS BACK, AND IT IS THE FIX FOR THE FLICKER.
+     *
+     * Anthony: "The containers flicker a bit at the start of the race." It is
+     * not z-fighting, not the instance table shuffling and not the rib
+     * texture — tools/flicker.mjs ruled out all three, the last one by taking
+     * the texture off entirely and watching the number barely move.
+     *
+     * What it is: the near scenery sweeps through the frame TWICE AS FAST as
+     * the city's. Same 0.05 units of camera travel changed 5.2% of the night
+     * city's pixels and 10-12% of the yard's. A container is a 6-high box that
+     * runs 14 to 28 units ALONG the road, so a row of them is a continuous
+     * unbroken wall — where a city block is a series of separate buildings
+     * with sky and gaps between them. Put that wall eight units off the kerb
+     * and drive at it at 200mph and it strobes.
+     *
+     * Standing it back is also just correct. A container terminal has a wide
+     * apron between the road and the first stack — that is where the straddle
+     * carriers work. Eight units is 3.4 metres, which is a pavement.
+     */
+    sceneryOff: 20,
 
     /**
      * NO ARMCO AND NO STREET FURNITURE, and both are deletions with a reason

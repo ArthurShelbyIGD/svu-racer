@@ -281,6 +281,49 @@ wants:
 furniture and barrier slots rather than adding to them; water is free; cranes
 are the one likely addition. It should come in at or under where the city sits.
 
+### Driven, 18 August: 1:28.3, and two things came back
+
+**The flicker was the yard standing too close.** Anthony: "The containers
+flicker a bit at the start of the race." `tools/flicker.mjs` ruled out three
+hypotheses before finding it — z-fighting (0% of the changed pixels were
+isolated, so no), the instance table shuffling under the water suppression (a
+STILL camera changes 0.00% of the frame, so the renderer is deterministic), and
+the rib texture (taking it off entirely moved 12.4% to 11.5%). What it was:
+containers are 6 high and run 14-28 units ALONG the road, so a row is an
+unbroken wall where a city block is separate buildings with gaps — and eight
+units off the kerb that wall sweeps through the frame twice as fast as the
+city's does. Standing it back to twenty units took the change rate to 4.2%,
+below MIDNIGHT MILE's own 5.2%. It is also just correct: a terminal has an
+apron between the road and the first stack.
+
+**"The track feels a bit lazy tbh" was right, and here is the number.** The
+first profile made features long and hard corners rare, which over 3,150
+segments is about twenty-three features and THREE HARD CORNERS IN FIVE MILES,
+every one a long constant-radius sweeper. `tools/launch.mjs` grew a corner
+census to say so: it now counts corners, how long you are inside each, and the
+longest flat-out run.
+
+| | MIDNIGHT MILE | THE DOCKS, before | after |
+|---|---|---|---|
+| corners per mile | 2.2 | 0.6 | 3.0 |
+| average corner | 1.0s | ~6s | 0.6s |
+| longest flat-out run | 13.8s | — | 16.5s |
+| worst curvature | 0.107 | 0.083 | 0.140 |
+
+The mistake was reading "long straights" as "long everything". A dock road is
+long runs between right-angle junctions. Straights doubled, corners dropped to
+two thirds, and there are twice as many of them.
+
+One check had to change with it, and the reasoning matters because the suite's
+own header forbids what it looks like. `hands off, the average position is
+outside the middle lane` was a proxy for corner DENSITY, and a track that is
+44% dead straight by design fails it at 4.2 against a 4.5 bar while being
+demonstrably fine — 25% of hands-off frames are off the road entirely. It is
+now a RATIO against the driven line, which is the invariant the proxy stood in
+for, is stricter than the 2x bar beside it, and cannot rot on a future track
+that is straighter or twistier still. MIDNIGHT MILE scores 9.2x, THE DOCKS
+11.3x, and a self-steering car scores 1x whatever the road does.
+
 ## 4. Points and credits
 
 Earned by playing, in readiness for the garage. Bonuses for:

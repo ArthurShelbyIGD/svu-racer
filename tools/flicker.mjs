@@ -56,7 +56,38 @@ const b = await chromium.launch({
   args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--disable-dev-shm-usage'],
 });
 
-const walk = async (query, seg, step, prep) => {
+/**
+ * @param mode  'drive'  — advance st.dist by `step` a frame
+ *              'jitter' — HOLD STILL and wobble the camera sideways by `step`,
+ *                         alternating each frame
+ *
+ * 'jitter' exists because the first version of this tool got the answer wrong
+ * and Anthony had to report the same bug twice. It only ever moved the camera
+ * FORWARD, and then classified what changed as speckle or patches, and ruled
+ * out z-fighting because there was no speckle.
+ *
+ * THAT INFERENCE IS FALSE FOR LARGE FLAT SURFACES. Speckle is what z-fighting
+ * looks like on a curved or angled surface, where the two depths cross back and
+ * forth across the pixel grid. Two EXACTLY COPLANAR quads have equal depth over
+ * their whole overlap, so the winner flips wholesale — a container-sized patch
+ * of one colour replaced by a container-sized patch of another. Which is
+ * precisely what "like colours are fighting each other" describes, and my
+ * heuristic filed it under "patches, therefore motion, therefore not
+ * z-fighting".
+ *
+ * The honest discriminator is not the SHAPE of the change, it is how the change
+ * scales with how far the camera moved. Real rendering is smooth: move the
+ * camera a five-hundredth of a unit and almost nothing changes. Z-fighting is
+ * a coin flip on a float comparison: move it a five-hundredth of a unit and an
+ * arbitrary fraction of the contested surface changes owner. So jitter the
+ * camera by an amount far too small to move anything visibly, and anything that
+ * changes a lot is fighting.
+ *
+ * A tenth of that jitter is also, roughly, what a hand holding a phone does to
+ * a tilt-steered car sitting still on the grid — which is exactly where Anthony
+ * sees it and exactly the case a frozen harness cannot reach.
+ */
+const walk = async (query, seg, step, prep, mode = 'drive') => {
   const p = await b.newPage({ viewport: { width: 640, height: 320 }, deviceScaleFactor: 1 });
   const errs = [];
   p.on('pageerror', (e) => errs.push(e.message));
@@ -81,7 +112,13 @@ const walk = async (query, seg, step, prep) => {
 
   const out = [];
   for (let k = 0; k < FRAMES; k++) {
-    await p.evaluate((d) => { window.RACER.st.dist = d; }, seg * 6 + k * step);
+    if (mode === 'jitter') {
+      // Same distance every frame; the camera twitches sideways instead.
+      await p.evaluate(([d, x]) => { window.RACER.st.dist = d; window.RACER.tune.holdX = x; },
+                       [seg * 6, (k % 2 ? 1 : -1) * step]);
+    } else {
+      await p.evaluate((d) => { window.RACER.st.dist = d; }, seg * 6 + k * step);
+    }
     await p.waitForTimeout(200);
     out.push(PNG.sync.read(await p.screenshot()));
   }
@@ -147,13 +184,30 @@ const CASES = [
   { q: '?track=docks', seg: 200,  step: 0.05, what: 'the Docks with the tile at quarter frequency',
     prep: () => { const t = window.RACER.scenery.mesh.material.map;
                   t.repeat.set(0.25, 1); t.needsUpdate = true; } },
+
+  // ---- THE ONES THAT ACTUALLY ANSWER ANTHONY'S REPORT --------------------
+  //
+  // Stationary, with the camera twitching a two-hundredth of a unit. Nothing
+  // should change: that is a hundredth of a pixel of motion at any distance
+  // you can see. Anything that DOES change at this amplitude is deciding a
+  // depth comparison by coin flip.
+  //
+  // The night city is the control and it is not optional here — if the city
+  // scores the same, this measures something about the renderer rather than
+  // something about the yard.
+  { q: '?track=docks', seg: 200,  step: 0.005, mode: 'jitter',
+    what: 'THE DOCKS still, camera twitching 0.005 units' },
+  { q: '?track=docks', seg: 1400, step: 0.005, mode: 'jitter',
+    what: 'THE DOCKS still elsewhere, same twitch' },
+  { q: '',             seg: 200,  step: 0.005, mode: 'jitter',
+    what: 'MIDNIGHT MILE still, same twitch — the control' },
 ];
 
 console.log(`\n  ${FRAMES} FRAMES AT EACH POSE\n`);
 console.log('   where                                             step   changed   of which speckle');
 const shots = [];
 for (const c of CASES) {
-  const r = await walk(c.q, c.seg, c.step, c.prep);
+  const r = await walk(c.q, c.seg, c.step, c.prep, c.mode);
   let pct = 0, sp = 0;
   for (let k = 1; k < r.out.length; k++) {
     const m = compare(r.out[k - 1], r.out[k]);

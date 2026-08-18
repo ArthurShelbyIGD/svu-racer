@@ -324,6 +324,46 @@ for, is stricter than the 2x bar beside it, and cannot rot on a future track
 that is straighter or twistier still. MIDNIGHT MILE scores 9.2x, THE DOCKS
 11.3x, and a self-steering car scores 1x whatever the road does.
 
+### The flicker again, 18 August — and the first fix was the wrong bug
+
+Anthony had to report it twice: *"the containers still flicker badly at the
+start when stationary, like colours are fighting each other."* That description
+is precise and it is z-fighting, which the first investigation had ruled out.
+
+**THE INSTRUMENT WAS WRONG AND THAT IS THE LESSON.** `tools/flicker.mjs` only
+ever moved the camera FORWARD, then classified the changed pixels as speckle or
+patches, and dismissed z-fighting because there was no speckle. Speckle is what
+z-fighting looks like on a curved or angled surface. Two EXACTLY COPLANAR quads
+have equal depth across their whole overlap, so the winner flips wholesale — a
+container-sized patch of one colour replaced by a container-sized patch of
+another. The heuristic filed the signature of the bug under "not the bug".
+
+The honest discriminator is not the shape of the change but how it SCALES with
+camera movement. Real rendering is smooth; z-fighting is a coin flip on a float
+comparison. So hold still and twitch the camera 0.005 units — far too little to
+move anything visibly, and about what a hand does to a tilt-steered car on the
+grid:
+
+| | before | after |
+|---|---|---|
+| THE DOCKS, stationary, 0.005 twitch | 3.3% and 4.1% | 0.10% and 0.40% |
+| MIDNIGHT MILE, same twitch (control) | 0.93% | 0.93% |
+
+**The cause was that every container is the same width, which is the point of a
+container.** A city building draws its width from a range, so two at the same
+lateral offset still have their faces in different places. Every container is
+5.7 wide, and the offset came from `(sl % 3) * 2.5` — three values — so a third
+of all pairs had their long faces at identical x. Worse, two boxes placed at the
+same segment in the same row could land on the same offset and be exactly
+coincident.
+
+Three changes: ninety-seven offsets instead of three plus a term in `sub` so
+same-segment duplicates are impossible; one container every third segment, so a
+14.2-deep box in an 18-unit slot cannot overlap the one behind it; and no 40ft
+containers, because 28.3 does not fit in 18 and length variety is not worth a
+coin-flipped depth buffer. It looks better too — distinct blocks with aisles
+between them rather than one unbroken wall.
+
 ## 4. Points and credits
 
 Earned by playing, in readiness for the garage. Bonuses for:

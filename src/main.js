@@ -1884,7 +1884,11 @@ class Scenery {
       if (YARD) {
         this.spec[o + 1] = 5.7;
         this.spec[o + 2] = 6.0;
-        this.spec[o + 3] = a3 < 0.62 ? 14.2 : 28.3;    // mostly 20ft, some 40ft
+        // ALL 20FT, AND THE 40FT ONES HAD TO GO. A 28.3-unit box cannot fit
+        // in an 18-unit slot, and overlapping identical boxes is the whole of
+        // the flicker bug below. Length variety is not worth a coin-flipped
+        // depth buffer; the stack heights carry the variation instead.
+        this.spec[o + 3] = 14.2;
         // Weighted low. A yard that is four high everywhere is a wall and you
         // can see nothing over it; the cranes and the ships are supposed to be
         // the skyline, so the boxes have to let them through.
@@ -2084,6 +2088,10 @@ class Scenery {
           const ws = waterAt(TRACK, a);
           if (ws === 2 || ws === side) continue;
         }
+        // ONE CONTAINER EVERY THIRD SEGMENT — 18 units for a 14.2 box. See the
+        // offset note below. Falls through to the parking loop like the water
+        // skip does, so it needs no machinery of its own.
+        if (YARD && a % 3 !== 0) continue;
         const w0 = this.spec[o + 1], bh = this.spec[o + 2], d0 = this.spec[o + 3];
         // THE CITY GETS TALLER AWAY FROM THE ROAD, and that is the fix for the
         // vanishing point being mostly sky.
@@ -2110,7 +2118,40 @@ class Scenery {
         // FROM THE TRACK. The city wants its street wall close; the container
         // yard wants an apron in front of it, and that difference turned out
         // to be the whole of the Docks flicker. See tracks.js's sceneryOff.
-        const off = ROAD_W + SCENERY_OFF + rrow * 11 + (sl % 3) * 2.5;
+        // ---- WHY THE CONTAINERS FOUGHT EACH OTHER --------------------------
+        //
+        // Anthony, twice: "the containers still flicker badly at the start when
+        // stationary, like colours are fighting each other." That description
+        // is exactly right and it is exactly z-fighting, which I had ruled out
+        // on a bad heuristic — see the header of tools/flicker.mjs.
+        //
+        // THE CAUSE IS THAT EVERY CONTAINER IS THE SAME WIDTH. A city building
+        // draws its width from a range, so two of them at the same lateral
+        // offset still have their faces in different places and nothing is
+        // coplanar. Every container is 5.7 wide by construction — that is the
+        // point of a container — so any two sharing an offset have their long
+        // side faces at IDENTICAL x. And the offset came from `(sl % 3) * 2.5`,
+        // which is three possible values, so a third of all pairs collided.
+        // Two coplanar quads have equal depth over their whole overlap, and
+        // which one wins each pixel is decided by float noise: hold still on a
+        // phone, let tilt twitch the camera a thousandth of a unit, and whole
+        // container faces swap colour.
+        //
+        // Two changes, and both are needed:
+        //
+        //   NINETY-SEVEN OFFSETS INSTEAD OF THREE, spread over four units, plus
+        //   a term in `sub` so two boxes placed at the SAME segment in the same
+        //   row can never land on the same one — that case was not a near miss,
+        //   it was two boxes in exactly the same place.
+        //
+        //   AND ONE CONTAINER EVERY THIRD SEGMENT. Even with distinct offsets,
+        //   a 14.2-deep box every 6 units overlaps the two behind it, and two
+        //   parallel faces a few hundredths apart still fight at the grazing
+        //   angles you get looking down a row. At 18 units they do not touch at
+        //   all: 14.2 of container and 3.8 of daylight, which is what the aisle
+        //   between two rows actually looks like.
+        const off = ROAD_W + SCENERY_OFF + rrow * 11 +
+          (YARD ? sub * 3.3 + ((sl * 37) % 97) * 0.042 : (sl % 3) * 2.5);
         const px = SX[i] + side * off;
         // MIRROR BY WHERE IT ACTUALLY IS, not by which side of the road it was
         // assigned to. The geometry only has the flank facing -X, so it has to
@@ -2120,7 +2161,11 @@ class Scenery {
         const sx = px < 0 ? -1 : 1;
         // A little jitter along the road, stable per place, so 220 segments of
         // buildings do not read as a comb.
-        const z = SZ[i] + ((sl % 5) - 2) * 0.9;
+        // NO JITTER IN A YARD. The comment above is about buildings, where a
+        // regular spacing reads as a comb; containers are stacked in surveyed
+        // rows and the regularity IS the look. It also protects the 3.8-unit
+        // gap that keeps them from overlapping: +-1.8 of jitter would close it.
+        const z = SZ[i] + (YARD ? 0 : ((sl % 5) - 2) * 0.9);
         // HOW FAR THE EYE IS FROM THIS BUILDING — IN THREE DIMENSIONS, AND
         // THAT IS THE WHOLE CORRECTION.
         //

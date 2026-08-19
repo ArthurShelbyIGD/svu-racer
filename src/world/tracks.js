@@ -89,6 +89,9 @@ export const TRACKS = {
     bridge: true,
     tunnel: true,
     scenery: 'city',
+    // Enclosures along the road. The night city has one: the tunnel it always
+    // had, at the segments the module found by reading the profile.
+    enclosures: [{ atSeg: 1520, lenSeg: 80, narrow: true }],
     // How far off the road edge the first row stands. The city's street wall
     // is close, which is what makes it a street.
     sceneryOff: 8,
@@ -204,6 +207,12 @@ export const TRACKS = {
      * carriers work. Eight units is 3.4 metres, which is a pavement.
      */
     sceneryOff: 20,
+    // THE SET PIECES. Their POSITIONS are not here — src/world/docks.js finds
+    // the straightest run in each zone and returns where they landed, and the
+    // ferry's hull and the underpass slab are built from those answers. A
+    // hardcoded segment number is the thing that rotted the moment this
+    // profile was regenerated, which it already has been once.
+    setPieces: true,
 
     /**
      * NO ARMCO AND NO STREET FURNITURE, and both are deletions with a reason

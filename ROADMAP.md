@@ -364,6 +364,52 @@ containers, because 28.3 does not fit in 18 and length variety is not worth a
 coin-flipped depth buffer. It looks better too — distinct blocks with aisles
 between them rather than one unbroken wall.
 
+### Built 19 August: the ferry, two jumps, an underpass and the cranes
+
+All three set pieces are `track.hill` and `track.gap` and nothing else — the
+bridge's trick, three times, at zero draw calls. `src/world/docks.js`,
+`tools/docks.mjs`.
+
+**The sites are FOUND, not picked.** The bridge sits at segment 1111 because
+someone measured the lap offline, and that rots the moment the profile is
+regenerated — which the Docks profile already has been once. Each set piece
+names a zone and the module returns the straightest run inside it. All three
+came out on ground with a mean curvature of exactly zero, and the ferry's hull
+and the underpass slab are built from the returned answer rather than from a
+number written down twice.
+
+| | gate | at the cap |
+|---|---|---|
+| the ferry's bow ramp | ~185 mph | 38 segments of air |
+| the quay jump | ~145 mph | 40 segments |
+| the underpass | never launches, even boosted | — |
+
+**And it found a real physics bug that has been in the game since the bridge.**
+The launch test compared a ballistic step against the road at the end of the
+sub-step. At the unboosted cap this container clamps dt at 0.1, so travelled is
+exactly 21 units, nsub is 7 and hstep is exactly 3.000 — which divides the
+6-unit segment exactly. The last sub-step before a lip therefore starts exactly
+0.600 below the crest on a 0.20 ramp, the ballistic term gains exactly 0.600,
+and the gravity term takes 0.0087 away. **The test lost by nine thousandths of
+a unit and the car drove into the sea at 202mph while clearing the same jump at
+159.** No amount of substepping fixes it: the window and the sampling
+granularity are both `s*hstep`, so they shrink together.
+
+It asks the physical question now — the road can hold the car while it demands
+no more than `GRAVITY`, so `v*(s0-s1)/hdt > GRAVITY` is the launch — and
+nothing is compared against a position, so alignment cannot enter into it. The
+old comparison was removed rather than kept as a fallback: an OR of a correct
+test and a flaky one is exactly as flaky as the flaky one, and keeping it put
+the bug straight back in from the other side. `tools/bridge.mjs` confirms the
+night city's gate is unmoved at 140-150mph against its predicted 146.
+
+**The cranes** are two draw calls for all of them, and their ink is a second
+BUILT geometry rather than a scaled one — a crane is eleven boxes in a frame,
+so scaling the assembly moves the legs apart instead of thickening them. They
+are placed by asking `waterAt` which side the sea is on, because a ship-to-shore
+crane whose boom reaches over more containers is a crane that has never seen a
+ship. Nine draw calls at the worst moment, against a budget of sixteen.
+
 ## 4. Points and credits
 
 Earned by playing, in readiness for the garage. Bonuses for:

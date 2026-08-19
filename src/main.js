@@ -38,6 +38,8 @@ import { buildTunnel } from './world/tunnel.js';
 import { themeColours, themeName, cityTint, tileTint, flankShade, skyStops, cityInk, waterTint } from './art/theme.js';
 import { BRIDGE, shapeBridge, inGap, lipDist, gapWidth } from './world/bridge.js';
 import { currentTrack, waterAt } from './world/tracks.js';
+import { DOCKS, shapeDocks } from './world/docks.js';
+import { buildCranes } from './world/cranes.js';
 import { buildGantry } from './world/gantry.js';
 // PEDAL_TOP and PEDAL_W come from the cockpit because the cockpit DRAWS the
 // pedal and the boost bottle, and the picture and the hit test have to be the
@@ -824,7 +826,7 @@ class Road {
       const gapNext = track.gap ? track.gap[b] === 1 : false;
       const drop1 = gapHere ? BRIDGE.chasm : 0;
       const drop2 = gapNext ? BRIDGE.chasm : 0;
-      if (gapHere || gapNext) road = CHASM;
+      if (gapHere || gapNext) road = HOLE;
       // THE HAZARD BAND, on the tarmac immediately before the break. A
       // humpback bridge hides its own far side — that is what makes it a
       // humpback bridge — so from the approach there is nothing to see but a
@@ -1065,6 +1067,23 @@ const SCENERY_OFF = TRACK.sceneryOff;
  * other on screen and must not be the same colour.
  */
 const CHASM = 0x07080b;
+
+/**
+ * WHAT YOU SEE THROUGH A HOLE IN THE ROAD, WHICH IS NOT THE SAME THING ON
+ * BOTH TRACKS.
+ *
+ * On MIDNIGHT MILE it is a chasm under a broken bridge and it wants to be
+ * darker than everything near it. On THE DOCKS every hole is the sea — the
+ * ferry's bow ramp and the quay inlet both open onto water that is already
+ * being drawn either side of them, and a black rectangle between two panels
+ * of daylight water reads as a rendering fault rather than as a hazard.
+ *
+ * Darker than the open sea, though, and not equal to it: the hole has to look
+ * like somewhere you must not be. Deep harbour water in shadow does that
+ * honestly, and keeps the hazard reading without a black hole in a sunlit
+ * scene.
+ */
+const HOLE = WATER_ON ? 0x24455c : CHASM;
 
 /** The warning stripe at the broken bridge. Roadworks yellow, which is the one
  *  colour on this palette that means "stop looking at the scenery". */
@@ -2408,6 +2427,28 @@ const track = buildTrack(TRACK.segments, TRACK.seed, TRACK.profile);
 // code about it. See src/world/bridge.js for why the missing span is a separate
 // flag rather than a hole in the hill.
 if (TRACK.bridge) shapeBridge(track, SEG_LEN);
+// THE DOCKS' FERRY, QUAY JUMP AND UNDERPASS. Shapes into track.hill and
+// track.gap exactly as the bridge does, and hands back WHERE it put them —
+// the ferry's hull and the underpass slab are positioned from these rather
+// than from numbers written down twice. See src/world/docks.js.
+const SITES = TRACK.setPieces ? shapeDocks(track, SEG_LEN) : null;
+if (SITES) {
+  // THE SEA GOES WHERE THE SET PIECES ENDED UP, not where a config file
+  // guessed they would. The ferry sites itself by searching for a straight
+  // run, so a hand-written water range would have had the ship moored in a
+  // container yard the first time the profile changed — and the profile has
+  // already changed once. Derived, therefore, from the same answer the hull
+  // and the slab are built from.
+  const F = SITES.ferry, Q = SITES.quayJump;
+  TRACK.water.push(
+    // Water both sides for the length of the ship and the jump off it: a ferry
+    // that is not in water is a shed.
+    { from: F.deckAt - 3, to: F.gapFrom + F.gapLen + 10, side: 0 },
+    // And the quay jump clears a dock inlet, which is the only reason there
+    // would be a hole in a quay.
+    { from: Q.gapFrom - 4, to: Q.gapFrom + Q.gapLen + 6, side: 0 },
+  );
+}
 const handling = deriveHandling(track);
 CENTRIFUGAL = handling.cent;
 
@@ -2740,9 +2781,64 @@ const gantry = buildGantry({
 // It costs one draw call while it is on screen and nothing when it is not, and
 // the finish gantry — the frame that sets the worst-case budget — is 500
 // segments away, so the two can never be drawn together.
-const tunnel = TRACK.tunnel
-  ? buildTunnel({ scene, palette: PAL, ink: INK, roadW: ROAD_W,
-                  segLen: SEG_LEN, segCount: SEG_COUNT, behind: BEHIND })
+/**
+ * THE ENCLOSURES — plural now, because the Docks has two and they are not the
+ * same kind of thing.
+ *
+ * The night city has one tunnel. The Docks has a FERRY'S VEHICLE DECK, which
+ * encloses you completely and should narrow the stray limit exactly as a
+ * tunnel does, and an UNDERPASS SLAB, which is a bridge over the road with
+ * open sides — so it must NOT narrow anything, or the car would clip an
+ * invisible wall where there is visibly daylight.
+ *
+ * Both are the same module at different sizes. Their positions come from
+ * SITES, so an enclosure cannot end up anywhere other than where the ground
+ * was shaped for it.
+ */
+const enclosures = (TRACK.enclosures || []).map((e) => ({
+  narrow: e.narrow,
+  t: buildTunnel({ scene, palette: PAL, ink: INK, roadW: ROAD_W,
+                   segLen: SEG_LEN, segCount: SEG_COUNT, behind: BEHIND,
+                   atSeg: e.atSeg, lenSeg: e.lenSeg, wallX: e.wallX,
+                   lightEvery: e.lightEvery, segTotal: TRACK.segments }),
+}));
+if (SITES) {
+  // THE FERRY'S CAR DECK. Narrower than a road tunnel because a ship is, and
+  // lit, because a vehicle deck is lit at any hour — which is also the one
+  // place on a golden-hour track where the night palette's warm lamp glow is
+  // exactly right rather than a leftover.
+  enclosures.push({ narrow: true, t: buildTunnel({
+    scene, palette: PAL, ink: INK, roadW: ROAD_W, segLen: SEG_LEN,
+    segCount: SEG_COUNT, behind: BEHIND, segTotal: TRACK.segments,
+    atSeg: SITES.ferry.deckAt, lenSeg: SITES.ferry.deckLen,
+    wallX: 10.6, lightEvery: 3 }) });
+  // THE UNDERPASS SLAB. Short, wide and NOT narrowing: you can see out of both
+  // sides of it, so there must be nothing there to hit.
+  enclosures.push({ narrow: false, t: buildTunnel({
+    scene, palette: PAL, ink: INK, roadW: ROAD_W, segLen: SEG_LEN,
+    segCount: SEG_COUNT, behind: BEHIND, segTotal: TRACK.segments,
+    atSeg: SITES.underpass.slabAt, lenSeg: SITES.underpass.slabLen,
+    // WIDE WALLS AND FEW LIGHTS. The tunnel module always builds side walls,
+    // and at 15 units they were close enough to read as a tunnel — which is
+    // not what this is. Pushed out to 26 they sit outside the frame at the
+    // speeds you pass under it, so what is left on screen is a slab overhead
+    // and daylight at both ends, which is an underpass.
+    wallX: 26.0, lightEvery: 4 }) });
+}
+// The one the rest of the game asks questions of. It answers for ALL of them,
+// so nothing downstream has to know there is more than one.
+const tunnel = enclosures.length
+  ? {
+      mesh: enclosures[0].t.mesh,
+      // `inside` gates the stray limit, so only the enclosures that actually
+      // have walls may answer yes.
+      inside: (d) => enclosures.some((e) => e.narrow && e.t.inside(d)),
+      // The audio wants the strongest enclosure anywhere near you, open-sided
+      // or not — driving under a slab does change the engine note.
+      enclosure: (d) => enclosures.reduce((m, e) => Math.max(m, e.t.enclosure(d)), 0),
+      update: (...a) => { for (const e of enclosures) e.t.update(...a); },
+      stats: () => enclosures.map((e) => e.t.stats()),
+    }
   // A STUB WITH THE SAME SHAPE, not a null. Six places ask the tunnel whether
   // the car is inside it — the audio's reverb, the stray limit, the headlight
   // wash — and every one of them would need a guard. A tunnel that is never
@@ -2751,6 +2847,35 @@ const tunnel = TRACK.tunnel
       update: () => {}, stats: () => ({ calls: 0, tris: 0 }) };
 // One texture for the whole game. Generated at startup from a few hundred
 // bytes of canvas drawing, never downloaded.
+/**
+ * THE CRANES. Only where there is water to reach over, which is the whole of
+ * why they are placed by asking `waterAt` rather than from a list: a
+ * ship-to-shore crane standing in the middle of a container yard with its boom
+ * over more containers is a crane that has never seen a ship.
+ *
+ * Two draw calls when any are on screen and none when they are not. They are
+ * also the reason the Armco and the street furniture could go: those were two
+ * calls of city furniture that made no sense here, and this is two calls of
+ * dock furniture that does.
+ */
+const cranes = TRACK.scenery === 'containers'
+  ? buildCranes({
+      scene, roadW: ROAD_W, segLen: SEG_LEN, segCount: SEG_COUNT,
+      // FURTHER OUT THAN THE FIRST TRY, which put them at 46 — a crane spans
+      // 40 units, so its landward leg stood 26 from the centre line and the
+      // boom went straight over the road. Photographed, it filled the
+      // windscreen from a hundred units away. A landmark has to be looked AT,
+      // which means it has to be over there.
+      every: 130, max: 5, off: 78,
+      colour: 0xc4553a, ink: CITY_INK,
+      // A crane reaches over WATER. `waterAt` returns which side the sea is on
+      // — and 2 means both, the causeway, where a crane would be standing in
+      // it. So: one side of water and not the other, which is exactly the
+      // quayside case.
+      allowed: (seg) => { const w = waterAt(TRACK, seg); return w === 1 || w === -1 ? w : 0; },
+    })
+  : { update: () => {}, stats: () => ({ calls: 0, tris: 0, placed: 0 }), mesh: null };
+
 const PENCIL = pencilTexture(128);
 
 // ---- the car ---------------------------------------------------------------
@@ -3690,11 +3815,67 @@ function frame(now) {
       d = d1;
       if (!st.air) {
         if (race.state === 'crash') break;
-        const vyRoad = st.speed * slopeAt(d0);
+        // ---- LEAVING THE GROUND, AND THE FOURTH VERSION OF THIS TEST -------
+        //
+        // The three before it were wrong in ways that reached the phone. This
+        // one was wrong in a way that reached the harness, which is progress,
+        // and it is worth writing down because it looks correct.
+        //
+        // It compared where a ballistic step would put the car against where
+        // the road is at the end of the sub-step. That is right in spirit and
+        // it is DECIDED BY ALIGNMENT at a hard lip. Work it through for the
+        // Docks quay ramp at the unboosted cap: this container renders slowly
+        // enough that dt clamps at 0.1, so travelled is exactly 21 units, nsub
+        // is 7, and hstep is exactly 3.000 — which divides the 6-unit segment
+        // exactly. The last sub-step before the lip therefore starts exactly
+        // 3 units short of it, and on a 0.2 ramp that is exactly 0.600 below
+        // the crest. The ballistic term gains exactly 0.600. The gravity term
+        // takes 0.0087 away. The test loses by nine thousandths of a unit and
+        // the car drives into the sea at 202mph while clearing the same jump
+        // at 159, where nothing divides evenly.
+        //
+        // No amount of substepping fixes that: the window and the sampling
+        // granularity are both s*hstep, so they shrink together and the case
+        // stays marginal forever.
+        //
+        // SO ASK THE QUESTION PHYSICS ASKS INSTEAD. A car stays on the road
+        // while the road can pull it down no faster than gravity does. Over a
+        // sub-step the road demands
+        //
+        //     a = v * (s0 - s1) / hdt
+        //
+        // and contact is lost when that exceeds GRAVITY. At a slope
+        // discontinuity s0 - s1 is a finite step over an infinitesimal time,
+        // so a is enormous and the car always launches — which is what a hard
+        // lip IS. On a gentle crest, s0 - s1 across a sub-step is small and it
+        // stays glued: the underpass exit works out at 43 against a gravity of
+        // 85, and stays down, correctly, at any frame rate.
+        //
+        // Alignment cannot enter into it, because nothing here is compared
+        // against a position.
+        const s0 = slopeAt(d0), s1 = slopeAt(d1);
+        const vyRoad = st.speed * s0;
         const bal = roadYAt(d0) + vyRoad * hdt - 0.5 * GRAVITY * hdt * hdt;
-        if (st.speed > 1 && bal > roadYAt(d1) + 1e-4) {
+        //
+        // AND THE OLD POSITION COMPARISON IS GONE ENTIRELY, not kept as a
+        // belt-and-braces `||`. Keeping it looked prudent and put the
+        // alignment bug straight back in from the other side: on the
+        // underpass exit at exactly 21 units a frame it fired spuriously and
+        // hopped the car three segments out of a feature that is explicitly
+        // not a jump — while the SAME feature stayed glued at the boosted cap,
+        // where nothing divides evenly. Speed-inverted behaviour is the
+        // signature, and there is only ever one cause.
+        //
+        // The two tests do not agree at the margins and only one of them is
+        // physics. A condition that is the OR of a correct test and a flaky
+        // one is exactly as flaky as the flaky one.
+        const demand = hdt > 0 ? st.speed * (s0 - s1) / hdt : 0;
+        if (st.speed > 1 && demand > GRAVITY) {
           st.air = 1;
-          st.y = bal;
+          // NEVER BELOW THE ROAD. `bal` is the ballistic position and at a
+          // discontinuity the road under d0 can be above it, which would start
+          // the flight inside the tarmac and land it instantly.
+          st.y = Math.max(bal, roadYAt(d0));
           st.vy = vyRoad - GRAVITY * hdt;
         } else {
           st.y = roadYAt(d1);
@@ -3879,6 +4060,7 @@ function frame(now) {
   PROF.furniture += performance.now() - t3;
   gantry.update(track, base, frac, st.x, baseY);
   tunnel.update(track, base, frac, st.x, baseY);
+  cranes.update(track, base, frac, st.x, baseY);
   PROF.n++;   // smoothed, not spiky
 
   // --- car pose ---
@@ -4185,7 +4367,7 @@ window.RACER = {
   // The barrier, so a harness can hide it and measure what it was covering.
   // Without a handle on the mesh, "is it on screen and how big is it" can only
   // be answered by eye, and by eye it was mistaken for the pavement railings.
-  barrier: posts, tunnel,
+  barrier: posts, tunnel, cranes,
   // THE MENU, so a harness can get it out of the way. It is a DOM layer over
   // the canvas, which means every tool that takes a page screenshot now
   // photographs the landing page unless it says otherwise — and that is not
@@ -4196,6 +4378,11 @@ window.RACER = {
   // The bridge's shape and its distances, so a harness measures the jump
   // against the module's own numbers rather than against a copy of them.
   bridge: { BRIDGE, lipDist, gapWidth, inGap: (d) => inGap(track, d, SEG_LEN) },
+  // WHERE THE DOCKS' SET PIECES ACTUALLY LANDED. They site themselves by
+  // searching for the straightest run in a zone, so a harness that hardcoded
+  // their positions would be testing a guess. It asks instead.
+  sites: SITES,
+  docks: SITES ? { DOCKS, inGap: (d) => inGap(track, d, SEG_LEN) } : null,
   // The pacing, so a harness can prove the cap draws what it claims rather
   // than trusting the readout that the cap itself writes.
   pace: {

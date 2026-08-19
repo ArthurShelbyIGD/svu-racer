@@ -40,6 +40,7 @@ import { BRIDGE, shapeBridge, inGap, lipDist, gapWidth } from './world/bridge.js
 import { currentTrack, waterAt } from './world/tracks.js';
 import { DOCKS, shapeDocks } from './world/docks.js';
 import { buildCranes } from './world/cranes.js';
+import { buildFerry } from './world/ferry.js';
 import { buildGantry } from './world/gantry.js';
 // PEDAL_TOP and PEDAL_W come from the cockpit because the cockpit DRAWS the
 // pedal and the boost bottle, and the picture and the hit test have to be the
@@ -707,7 +708,12 @@ class Road {
     // road, left verge, right verge, left apron, right apron, centre dashes
     // road, verge L, verge R, dash, apron L, apron R, then SIX INK STRIPS:
     // both road edges, both verge edges, and both sides of the centre dash.
-    const quads = (SEG_COUNT + BEHIND) * 12;
+    // FOURTEEN, not twelve: the two quay walls the Docks needs where the sea
+    // sits below the road. Allocated for every segment rather than only the
+    // wet ones because this buffer is sized once at boot and the wet segments
+    // move past you — and running off the end of it silently drops geometry,
+    // which is a very quiet way for a road to develop holes.
+    const quads = (SEG_COUNT + BEHIND) * 14;
     const verts = quads * 4;
     const idx = quads * 6;
 
@@ -959,12 +965,49 @@ class Road {
       const wet = alt ? WATER.a : WATER.b;
       const gl = (w === -1 || w === 2) ? wet : ground;
       const gr = (w === 1 || w === 2) ? wet : ground;
+
+      // ---- THE SEA HAS ITS OWN LEVEL, AND EVERYTHING ELSE FOLLOWS THE ROAD --
+      //
+      // The ground quads sit at the road's own height, which is right for
+      // ground and catastrophic for water: on the ferry's approach the road
+      // climbs nine units onto the vehicle deck, so the SEA CLIMBED WITH IT
+      // and buried the ship's hull to its deck edge. Photographed, the ferry
+      // was a white shed floating on a slope.
+      //
+      // Sea level is the NATURAL profile — the landscape before the set pieces
+      // were added into it, which is exactly what track.docksAdd records — less
+      // a small drop for the quay edge. So a ramp rises out of the water, a
+      // bridge spans it, and the causeway sits just above it, all for one
+      // subtraction. It also means the sea is level across the width of the
+      // frame instead of tilting with the camber, which is most of why the
+      // first Docks read as wet tarmac rather than as water.
+      const dA = track.docksAdd;
+      const wy1 = dA ? y1 - dA[a] - WATER_DROP : y1 - WATER_DROP;
+      const wy2 = dA ? y2 - dA[b] - WATER_DROP : y2 - WATER_DROP;
+      const lWet = (w === -1 || w === 2), rWet = (w === 1 || w === 2);
+      const ly1 = lWet ? wy1 : y1, ly2 = lWet ? wy2 : y2;
+      const ry1 = rWet ? wy1 : y1, ry2 = rWet ? wy2 : y2;
       this._quad(q++,
-        x1 - ROAD_W - GRASS_W, y1, z1, x2 - ROAD_W - GRASS_W, y2, z2,
-        x2 - ROAD_W - vw, y2, z2, x1 - ROAD_W - vw, y1, z1, gl, shade);
+        x1 - ROAD_W - GRASS_W, ly1, z1, x2 - ROAD_W - GRASS_W, ly2, z2,
+        x2 - ROAD_W - vw, ly2, z2, x1 - ROAD_W - vw, ly1, z1, gl, shade);
       this._quad(q++,
-        x1 + ROAD_W + vw, y1, z1, x2 + ROAD_W + vw, y2, z2,
-        x2 + ROAD_W + GRASS_W, y2, z2, x1 + ROAD_W + GRASS_W, y1, z1, gr, shade);
+        x1 + ROAD_W + vw, ry1, z1, x2 + ROAD_W + vw, ry2, z2,
+        x2 + ROAD_W + GRASS_W, ry2, z2, x1 + ROAD_W + GRASS_W, ry1, z1, gr, shade);
+      // THE QUAY WALL. Dropping the sea leaves a vertical gap between the
+      // verge and the water, and an unfilled gap shows the sky through the
+      // ground. One quad per wet side closes it, and it is not a patch: a
+      // quayside IS a wall, and having one is what makes the road read as
+      // standing above the water rather than lying on it.
+      if (lWet) {
+        this._quad(q++,
+          x1 - ROAD_W - vw, y1, z1, x2 - ROAD_W - vw, y2, z2,
+          x2 - ROAD_W - vw, ly2, z2, x1 - ROAD_W - vw, ly1, z1, PAL.gutterB, shade * 0.72);
+      }
+      if (rWet) {
+        this._quad(q++,
+          x1 + ROAD_W + vw, ry1, z1, x2 + ROAD_W + vw, ry2, z2,
+          x2 + ROAD_W + vw, y2, z2, x1 + ROAD_W + vw, y1, z1, PAL.gutterB, shade * 0.72);
+      }
     }
 
     this.posAttr.needsUpdate = true;
@@ -1045,6 +1088,8 @@ const CITY_INK = cityInk();
  */
 const WATER = waterTint();
 const WATER_ON = !!(TRACK.water && TRACK.water.length);
+/** How far the sea sits below the natural ground. About a metre of quay edge. */
+const WATER_DROP = 2.5;
 
 /**
  * IS THE SCENERY A CONTAINER YARD RATHER THAN A CITY.
@@ -2443,7 +2488,13 @@ if (SITES) {
   TRACK.water.push(
     // Water both sides for the length of the ship and the jump off it: a ferry
     // that is not in water is a shed.
-    { from: F.deckAt - 3, to: F.gapFrom + F.gapLen + 10, side: 0 },
+    // FROM THE FOOT OF THE LINKSPAN, not from the ship's stern. A ferry is in
+    // a berth: the water is alongside you before you are on the ramp, and the
+    // ramp is a bridge over it. Starting the sea at the stern meant the ship
+    // sat in dry land with the water beginning underneath it, and the hull's
+    // waterline — three separate bands of paint that exist to be seen against
+    // water — had nothing to be seen against.
+    { from: F.at - 10, to: F.gapFrom + F.gapLen + 12, side: 0 },
     // And the quay jump clears a dock inlet, which is the only reason there
     // would be a hole in a quay.
     { from: Q.gapFrom - 4, to: Q.gapFrom + Q.gapLen + 6, side: 0 },
@@ -2807,11 +2858,12 @@ if (SITES) {
   // lit, because a vehicle deck is lit at any hour — which is also the one
   // place on a golden-hour track where the night palette's warm lamp glow is
   // exactly right rather than a leftover.
-  enclosures.push({ narrow: true, t: buildTunnel({
-    scene, palette: PAL, ink: INK, roadW: ROAD_W, segLen: SEG_LEN,
-    segCount: SEG_COUNT, behind: BEHIND, segTotal: TRACK.segments,
-    atSeg: SITES.ferry.deckAt, lenSeg: SITES.ferry.deckLen,
-    wallX: 10.6, lightEvery: 3 }) });
+  // THE FERRY IS A SHIP NOW, not the tunnel module in a hat. See the head of
+  // src/world/ferry.js for what was wrong with the first one and why a hole in
+  // a wall cannot be fixed by painting a door on it.
+  enclosures.push({ narrow: true, t: buildFerry({
+    scene, segLen: SEG_LEN, segCount: SEG_COUNT, behind: BEHIND,
+    atSeg: SITES.ferry.deckAt, deckLen: SITES.ferry.deckLen }) });
   // THE UNDERPASS SLAB. Short, wide and NOT narrowing: you can see out of both
   // sides of it, so there must be nothing there to hit.
   enclosures.push({ narrow: false, t: buildTunnel({

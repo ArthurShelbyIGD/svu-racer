@@ -133,17 +133,31 @@ export const DOCKS = {
     // way ON to the ship, and a car launched onto a vehicle deck lands inside
     // a vehicle deck. A real linkspan is a long shallow thing for the same
     // reason — lorries ground out.
-    on: 34,         // shore ramp up onto the deck, eased both ends: NOT a jump
+    // FORTY-FOUR NOW, because the deck went up. A shallow crest is only
+    // shallow relative to its length: 5.77*9*284^2/85 wants 222 units, which
+    // is 37 segments, and the natural profile underneath eats the margin.
+    on: 44,         // shore ramp up onto the deck, eased both ends: NOT a jump
     deck: 54,       // 324 units of vehicle deck, enclosed
-    bow: 12,        // the bow ramp, linear, slope 0.20: this one IS a jump
+    bow: 9,         // the bow ramp, linear, slope 0.20: this one IS a jump
     // 168 UNITS, down from 192. At 192 the gate sat at about 185mph — you had
     // to arrive within a whisker of the unboosted cap or swim, which is a
     // coin-toss dressed as a skill gate. 168 puts it near 175 and leaves the
     // showpiece feeling earnable rather than punitive.
     gap: 28,        // 168 units of open water, LEVEL with the lip
     down: 22,       // and the far quay ramps down after the water, not across it
-    deckY: 5,       // the vehicle deck above the quay
-    bowRise: 14.4,  // bow * SEG_LEN * 0.20, stated so a harness can check it
+    // NINE, NOT FIVE, AND IT IS WHY THE SHIP LOOKS LIKE A SHIP.
+    //
+    // The car deck's height above the water IS the freeboard, and at five
+    // units - two metres - the hull was a raft with a shed on it. Nine is
+    // 3.9m, which is what a ro-ro actually has, and it gives the topsides, the
+    // hull band and the boot topping room to be three separate things instead
+    // of one stripe.
+    //
+    // The bow ramp came DOWN to pay for it, twelve segments to nine, so the
+    // lip stays at 19.8 against the old 19.4 and the jump Anthony has already
+    // learned does not move under him.
+    deckY: 9,       // the vehicle deck above the quay
+    bowRise: 10.8,  // bow * SEG_LEN * 0.20, stated so a harness can check it
   },
 
   /**

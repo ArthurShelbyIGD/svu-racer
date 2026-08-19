@@ -410,6 +410,56 @@ are placed by asking `waterAt` which side the sea is on, because a ship-to-shore
 crane whose boom reaches over more containers is a crane that has never seen a
 ship. Nine draw calls at the worst moment, against a budget of sixteen.
 
+### 19 August: the ferry is a ship, not a tunnel in a hat
+
+Anthony drove the first one: *"The ferry really just looks like a tunnel, it
+needs to actually look and feel like a ship to be convincing. Way more
+attention to what it is meant to represent rather than re use a shape from the
+original track."*
+
+He was right, and the shortcut came from THIS FILE — "the ferry's car deck is
+the tunnel" was written here as a plan, and as an estimate of effort it was
+correct, which is the trap. `src/world/ferry.js` is a ship: a lofted hull with
+a square transom and a fine entry, a hull band and boot topping, an
+accommodation block, a bridge, a funnel and a mast. One merged geometry plus
+one ink shell, so two draw calls when it is on screen and none when it is not.
+Nine of sixteen at the worst moment, unchanged.
+
+What actually makes it read, in the order you meet it:
+
+- **A silhouette from the linkspan** — a large object with a shape, standing
+  well above the road, with a funnel. A tunnel mouth has none of that.
+- **A transom, not an arch.** You drive through a hole in a flat wall with
+  ship either side and above it, hazard header over the opening, hull band and
+  name boards carried round the stern, ink frame round the door.
+- **Open sides on the car deck.** A low steel deckhead on transverse beams,
+  pillars down both sides, and fresh air above the bulwark with the sea and
+  the sunset going past. This is the one cue a tunnel can never have, because
+  a tunnel's defining property is that you cannot see out of it.
+- **And a bow door,** so the sky opens before the lip and you can see where you
+  are going to land.
+
+**The car deck went from five units above the water to nine,** because the
+freeboard IS the ship: at two metres the hull was a raft with a shed on it. The
+bow ramp came down from twelve segments to nine to pay for it, so the lip is at
+19.8 against the old 19.4 and the jump Anthony has already learned does not
+move under him.
+
+**And the sea got its own level.** Ground quads sit at the road's height, which
+is right for ground and catastrophic for water: the sea climbed the linkspan
+with the road and buried the hull to its deck edge. Sea level is now the
+natural profile — the landscape before the set pieces were added, which is what
+`track.docksAdd` records — less a small drop, with a quay wall quad closing the
+step. That is also why the road now reads as standing above the water
+everywhere rather than lying on it.
+
+Three bugs found by looking rather than reasoning: the ship vanished the moment
+its stern went behind the camera; walking the road eighty segments back to find
+it accumulated so much heading error that the ship sat a hundred units to the
+left (fixed by not walking at all — the berth is dead straight by construction,
+which is the same fact that lets the hull be rigid); and the bow was plated
+straight across, so the exit was a black wall.
+
 ## 4. Points and credits
 
 Earned by playing, in readiness for the garage. Bonuses for:

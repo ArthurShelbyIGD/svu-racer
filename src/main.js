@@ -3557,13 +3557,51 @@ function applyFov(hFovDeg) {
   bind('gZero', () => recentreTilt());
 }
 
+/**
+ * MEASURE HOW TALL THE SCREEN ACTUALLY IS, and tell the CSS.
+ *
+ * `window.innerHeight` and `position: fixed; inset: 0` both report the LAYOUT
+ * viewport, which on Android Chrome is the height with the address bar hidden.
+ * With the bar showing they overstate it by the height of the bar, and every
+ * fixed layer on the page hangs off the bottom of the phone.
+ *
+ * That never showed up because the game lives in fullscreen — and it appeared
+ * the moment the game was not, which is what switching tracks does: a page
+ * load always drops fullscreen. The front page came back with RACE and FULL
+ * SCREEN below the fold and no obvious way out.
+ *
+ * `visualViewport.height` is the honest number. Written into `--vph`, which
+ * every fixed layer's height is expressed in — and because it is a custom
+ * property a harness can override it, which is the only way to reproduce an
+ * address bar in a headless browser. tools/menufit.mjs does exactly that, the
+ * same way it fakes the Android safe-area insets.
+ */
+function applyViewportHeight() {
+  const vv = window.visualViewport;
+  const h = Math.round(vv ? vv.height : window.innerHeight);
+  if (h > 0) document.documentElement.style.setProperty('--vph', h + 'px');
+  return h;
+}
+
 function resize() {
-  const w = window.innerWidth, h = window.innerHeight;
+  const w = window.innerWidth, h = applyViewportHeight();
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   applyFov(baseFov);
 }
 window.addEventListener('resize', resize);
+// THE VISUAL VIEWPORT HAS ITS OWN EVENTS, and `resize` on window does not
+// always fire when the address bar slides in or out — that is the entire
+// difference between the two viewports and the reason this bug existed.
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', resize);
+  window.visualViewport.addEventListener('scroll', resize);
+}
+// And entering or leaving fullscreen changes it without a window resize on
+// some browsers, which is precisely the transition that goes wrong here.
+for (const e of ['fullscreenchange', 'webkitfullscreenchange', 'orientationchange']) {
+  document.addEventListener(e, () => setTimeout(resize, 60));
+}
 resize();
 
 // ---- frame timing --------------------------------------------------------

@@ -234,6 +234,15 @@ export function buildMenu(api) {
    * The player is told, because a screen that goes blank for a moment with no
    * warning reads as a crash. "LOADING…" on the button is the whole of it.
    */
+  // Read ONCE and cleared immediately, so the note appears on the page the
+  // switch produced and not on every page after it.
+  const SWITCHED = 'svu-racer-switched';
+  let justSwitched = false;
+  try {
+    justSwitched = sessionStorage.getItem(SWITCHED) === '1';
+    if (justSwitched) sessionStorage.removeItem(SWITCHED);
+  } catch (e) { /* no storage, no note */ }
+
   const trkBody = $('trkBody');
   trkBody.innerHTML = TRACK_ORDER.map((id) => {
     const t = TRACKS[id];
@@ -248,6 +257,9 @@ export function buildMenu(api) {
       if (b.dataset.t === trackName()) return;      // already on it; the label says DRIVING
       if (!chooseTrack(b.dataset.t)) return;
       b.textContent = 'LOADING…';
+      // A note to the next page load, which is about to happen. sessionStorage
+      // rather than a variable, for the obvious reason.
+      try { sessionStorage.setItem(SWITCHED, '1'); } catch (e) { /* then no note */ }
       // A BEAT BEFORE RELOADING, so the label is actually painted. Reloading
       // synchronously off the tap gives a frozen button and then a white
       // flash, which is the same thing a broken page looks like.
@@ -405,8 +417,20 @@ export function buildMenu(api) {
     full.textContent = dead ? 'NO FULL SCREEN'
       : s.fsState === 'fullscreen' ? 'EXIT FULL' : 'FULL SCREEN';
     full.classList.toggle('mDead', dead);
+    // AND SAY SO AFTER A TRACK SWITCH, because that is the one moment the
+    // player is dropped out of full screen by something WE did rather than by
+    // anything they chose. A browser always exits full screen on a page load
+    // and cannot be talked out of it; the reload is how a track is chosen.
+    //
+    // Anthony, after swapping tracks: "not really obvious how to get out of
+    // the situation, which is click the screen and hope it works." Most of
+    // that was the buttons being below the fold, which is fixed in the
+    // stylesheet — but "hope it works" deserves an answer too. RACE already
+    // takes full screen on its way into the countdown, so the honest line is
+    // that there is nothing to fix: just press it.
     const fsBit = s.fsState === 'fullscreen' ? ''
       : dead ? 'this browser blocks full screen — open the link in Chrome, or add it to your home screen'
+      : justSwitched ? 'changing track reloaded the page, so full screen came off — RACE puts it back'
       : '';
     const bestBit = s.best == null
       ? 'no time set'

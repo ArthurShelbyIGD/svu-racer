@@ -39,8 +39,38 @@
     --sal: env(safe-area-inset-left, 0px);
   }
   *, *::before, *::after { box-sizing: border-box; }
+
+  /* ---- HOW TALL THE SCREEN ACTUALLY IS -----------------------------------
+     `height: 100%` and `position: fixed; inset: 0` both resolve against the
+     LAYOUT viewport, and on Android Chrome the layout viewport is the height
+     with the address bar HIDDEN. So with the bar showing, every fixed layer on
+     this page is taller than the screen and its bottom edge is off the fold.
+
+     That is invisible in fullscreen, which is where the game normally lives —
+     and it appears the moment the game is NOT in fullscreen, which is exactly
+     what switching tracks does, because a page load always drops fullscreen.
+     Anthony, after swapping tracks: "I get this weird thing going on with the
+     screen... not really obvious how to get out of the situation, which is
+     click the screen and hope it works." The RACE and FULL SCREEN buttons were
+     below the bottom of the phone.
+
+     `--vph` is the real visible height, measured in JS from visualViewport and
+     kept up to date on resize, rotate and fullscreen change. CSS `100svh`
+     would do most of this on its own, and it is the fallback here — but a
+     measured value can be OVERRIDDEN BY A HARNESS, and no headless browser has
+     an address bar to reproduce the bug with. Same trick as the safe-area
+     insets, which are faked by tools/menufit.mjs for the same reason. */
+  :root { --vph: 100svh; }
+  @supports not (height: 100svh) { :root { --vph: 100vh; } }
+  /* AND vmin LIES FOR THE SAME REASON. On a landscape phone vmin IS the
+     height, and it is the layout height — so with an address bar showing,
+     every element sized in vmin is sized for a screen taller than the one it
+     is on. Fixing the container without fixing the contents just moves the
+     overflow inside. --vmn is vmin measured against the height that exists. */
+  :root { --vmn: min(100vw, var(--vph)); }
+
   html, body {
-    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    margin: 0; padding: 0; height: var(--vph); overflow: hidden;
     background: #0b0d14; color: #e8e6df;
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
     /* Stops the browser from scrolling, rubber-banding or firing a
@@ -50,7 +80,7 @@
     -webkit-user-select: none; user-select: none;
     -webkit-tap-highlight-color: transparent;
   }
-  #c { display: block; width: 100%; height: 100%; }
+  #c { display: block; width: 100%; height: var(--vph); }
 
   /* ---- the readout ----
      This is the entire point of the skeleton. It has to be legible on a small
@@ -143,12 +173,12 @@
      tester says "it didn't work", and that one sentence covers a device too old
      for WebGL2, a half-finished download, and a mistake I made an hour ago.
      This turns all three into different sentences. */
-  #fail { display: none; position: fixed; inset: 0; z-index: 99;
+  #fail { display: none; position: fixed; left: 0; top: 0; right: 0; height: var(--vph); z-index: 99;
     background: #0b0d14; color: #e8e6df; padding: 18px;
     font-size: 13px; line-height: 1.6; overflow: auto; white-space: pre-wrap;
     word-break: break-word; }
   #fail b { color: #ff6b5e; font-size: 16px; }
-  #note { position: fixed; left: 0; right: 0; bottom: 0;
+  #note { position: fixed; left: 0; right: 0; top: calc(var(--vph) - 2.6em);
     padding: 10px calc(12px + var(--sar)) max(10px, var(--sab)) calc(12px + var(--sal));
     font-size: 12px; color: #8a8b93; text-align: center;
     background: linear-gradient(#0000, #000b); pointer-events: none; }
@@ -166,7 +196,7 @@
      means the menu shrinks when the address bar appears instead of running off
      the bottom, which is the failure the readout hit twice before it was
      measured. tools/menufit.mjs checks it on six screens. */
-  #menu { position: fixed; inset: 0; display: none; z-index: 40;
+  #menu { position: fixed; left: 0; top: 0; right: 0; height: var(--vph); display: none; z-index: 40;
           font-family: inherit; color: #e8e6df; overflow: hidden; }
   #menu.show { display: block; }
   /* The city sits under everything and is deliberately not sharp: it is a
@@ -179,8 +209,8 @@
 
   .mPanel { position: absolute; inset: 0; display: none;
             flex-direction: column; align-items: center; justify-content: center;
-            padding: max(2vmin, var(--sat)) calc(3vmin + var(--sar))
-                     max(2vmin, var(--sab)) calc(3vmin + var(--sal)); }
+            padding: max(calc(var(--vmn) * 0.02), var(--sat)) calc(3vmin + var(--sar))
+                     max(calc(var(--vmn) * 0.02), var(--sab)) calc(3vmin + var(--sal)); }
   .mPanel.on { display: flex; }
 
   /* SIZED FOR THE SHORTEST SCREEN THERE IS, which is a 592x212 CSS viewport —
@@ -190,7 +220,8 @@
      pixels of overflow on a phone somebody is meeting the game on for the
      first time is four pixels too many. There is about twenty pixels of slack
      in it now. */
-  #mTitle { font-size: 7vmin; letter-spacing: 0.14em; font-weight: 700;
+  #mTitle { font-size: calc(var(--vmn) * 0.07); letter-spacing: 0.14em; font-weight: 700;
+            flex: 0 0 auto;
             text-shadow: 0 0.4vmin 1.6vmin #000c; margin-bottom: 0.2vmin; }
   .mSvu { color: #8ee23f; }
   /* The car overlaps the buttons slightly and sits behind them, which is what
@@ -206,8 +237,21 @@
      into the car to save a few pixels back when there were three rows of them;
      with two there is room, and Anthony's note was specifically that RACE
      "ruins the shot of the car". It clears it now. */
-  #mCar { width: min(74vmin, 62%); max-height: 30vmin; object-fit: contain;
-          margin: -0.5vmin 0 max(14px, 4.4vmin) 0; filter: drop-shadow(0 1vmin 2vmin #000a); }
+  /* AND THE CAR IS THE ONE THING ALLOWED TO GIVE WAY. `flex: 0 1 auto` with
+     `min-height: 0` lets the column squeeze it when the screen is too short
+     for everything — which is the correct order of sacrifice and is already
+     what the comment above says the policy is. It was never actually wired
+     up: an image with a max-height and no min-height override will not
+     shrink, so on a 166px screen it held its size and pushed the buttons off
+     the bottom instead. object-fit: contain means shrinking it is free. */
+  #mCar { width: min(74vmin, 62%); max-height: calc(var(--vmn) * 0.30);
+          flex: 0 1 auto; min-height: 0; object-fit: contain;
+          /* THE 14px FLOOR STAYS. Anthony asked for this gap by name — RACE
+             sitting on the bonnet "ruins the shot of the car" — so it is not
+             a pixel budget to raid when a screen gets short. The car shrinks
+             instead, which is what flex: 0 1 auto above is for. */
+          margin: -0.5vmin 0 max(14px, calc(var(--vmn) * 0.044)) 0;
+          filter: drop-shadow(0 1vmin 2vmin #000a); }
   /* THE BLOCK. Three equal columns and two rows, every cell the same size, so
      it reads as one object rather than as six things that happen to be near
      each other. Equal columns are what make it a block: sized to their content
@@ -229,7 +273,8 @@
      sat 15.8px off the centre of the page, in the one state nobody would think
      to screenshot. minmax(0, ...) forbids it. */
   #mGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
-           gap: 1.2vmin; justify-items: stretch; align-items: stretch;
+           gap: calc(var(--vmn) * 0.012); justify-items: stretch; align-items: stretch;
+           flex: 0 0 auto;
            /* SIZED FROM THE WIDTH, NOT FROM vmin. On a landscape phone vmin is
               the HEIGHT, so `min(84vmin, 96%)` gave a 178px-wide block on a
               592px-wide screen — three columns of 58px with FULL SCREEN and
@@ -240,8 +285,8 @@
               one; 94% keeps it off the edges of a narrow one. */
            width: min(94%, max(330px, 76vmin));
            position: relative; z-index: 2; }
-  #mGrid .mB { width: 100%; padding: max(6px, 1vmin) max(6px, 1.4vmin);
-               min-height: max(40px, 7vmin); white-space: nowrap; }
+  #mGrid .mB { width: 100%; padding: max(4px, calc(var(--vmn) * 0.010)) max(6px, 1.4vmin);
+               min-height: max(40px, calc(var(--vmn) * 0.07)); white-space: nowrap; }
   /* And the longest label of the three gets a smaller type size so it fits the
      cell it is no longer allowed to widen. */
   .mB.mDead { color: #7b8290; border-color: #2a2f3a; font-size: max(9px, 2vmin); }
@@ -253,10 +298,10 @@
      viewport is 25px, which is under the 44px everybody agrees a thumb needs —
      so there is a px floor under the vmin. The floor is what actually applies
      on the smallest screen and the vmin is what applies on the largest. */
-  .mB { font: inherit; font-size: max(11px, 2.6vmin); letter-spacing: 0.08em;
+  .mB { font: inherit; font-size: max(11px, calc(var(--vmn) * 0.026)); letter-spacing: 0.08em;
         color: #e8e6df; background: #171a22cc; border: 1px solid #3a4150;
-        border-radius: 1vmin; padding: max(9px, 1.7vmin) max(14px, 3vmin);
-        min-height: max(40px, 8vmin); cursor: pointer;
+        border-radius: 1vmin; padding: max(6px, calc(var(--vmn) * 0.017)) max(14px, 3vmin);
+        min-height: max(40px, calc(var(--vmn) * 0.08)); cursor: pointer;
         -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
   .mB:active { background: #232836; }
   /* And the longest label of the three gets a smaller type size so it fits the
@@ -266,11 +311,21 @@
   .mB.mBig:active { background: #3f9a26; }
 
   .mCard { background: #0b0d14ee; }
-  .mCard h2 { font-size: 4vmin; letter-spacing: 0.12em; margin: 0 0 2vmin 0; font-weight: 700; }
-  .mCard p { max-width: 74vmin; text-align: center; font-size: max(11px, 2.4vmin);
-             line-height: 1.5; color: #9aa0ad; margin: 0 0 2.5vmin 0; }
-  .mCard .mBack { margin-top: 2.5vmin; }
-  .mRow2 { display: flex; gap: 1.6vmin; margin-top: 2.5vmin; }
+  /* THE CARDS ARE SIZED FROM THE MEASURED HEIGHT TOO. They were the last
+     three panels still spilling on a 166px screen — a heading, a paragraph and
+     a BACK button, each with a vmin margin, is four separate places to be
+     seven pixels too generous. */
+  .mCard h2 { font-size: calc(var(--vmn) * 0.04); letter-spacing: 0.12em; flex: 0 0 auto;
+              margin: 0 0 calc(var(--vmn) * 0.018) 0; font-weight: 700; }
+  .mCard p { max-width: 74vmin; text-align: center; font-size: max(11px, calc(var(--vmn) * 0.024));
+             line-height: 1.45; color: #9aa0ad; margin: 0 0 calc(var(--vmn) * 0.022) 0;
+             /* The prose is the part that may be sacrificed on a short screen,
+                the same way the car is on the front page: a player who cannot
+                see BACK is stuck, and a player who cannot read all of a
+                "coming soon" note has lost nothing. */
+             flex: 0 1 auto; min-height: 0; overflow: hidden; }
+  .mCard .mBack { margin-top: calc(var(--vmn) * 0.022); flex: 0 0 auto; }
+  .mRow2 { display: flex; gap: 1.6vmin; margin-top: calc(var(--vmn) * 0.022); flex: 0 0 auto; }
   .rBig { color: #e8e6df !important; font-size: max(13px, 3vmin) !important; }
   .rNote { font-size: max(10px, 2.1vmin) !important; }
 
@@ -278,13 +333,17 @@
      in the results card at 844x390 — a flex row will happily wrap its children
      to honour a gap, and the gap was 6vmin. These are labels and numbers, not
      prose; they should push the row wider or shrink, never fold. */
+  /* THE LAP TIMES WERE THE LAST FIVE PIXELS. Four rows, each with a vmin of
+     padding above and below, is eight chances to be a pixel over — and vmin
+     on a landscape phone is the height that lies. */
   .tRow { display: flex; justify-content: space-between; align-items: baseline;
-          gap: 4vmin; width: min(84vmin, 94%); padding: 1.2vmin 0;
-          border-bottom: 1px solid #232836; font-size: max(11px, 2.5vmin); }
+          gap: 4vmin; width: min(84vmin, 94%); padding: calc(var(--vmn) * 0.010) 0;
+          flex: 0 0 auto;
+          border-bottom: 1px solid #232836; font-size: max(11px, calc(var(--vmn) * 0.025)); }
   .tRow span { color: #9aa0ad; letter-spacing: 0.08em; white-space: nowrap; }
-  .tRow b { font-size: max(14px, 3.4vmin); white-space: nowrap; }
+  .tRow b { font-size: max(13px, calc(var(--vmn) * 0.034)); white-space: nowrap; }
   .tRow b.good { color: #8ee23f; }
-  .tNote { margin-top: 2vmin !important; }
+  .tNote { margin-top: calc(var(--vmn) * 0.018) !important; }
 
   /* SETTINGS SCROLLS, and it is the only thing here that does. Seven rows with
      their explanations do not fit a 280px-tall phone at any font size worth
@@ -295,7 +354,7 @@
      rendering fault rather than as "there is more below" — and a setting
      nobody knows is there is a setting that does not exist. A mask that eats
      the last few millimetres says scroll without a word or an arrow. */
-  #sWrap { position: relative; width: min(84vmin, 96%); }
+  #sWrap { position: relative; width: min(84vmin, 96%); flex: 0 1 auto; min-height: 0; }
   #sWrap::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0;
                   height: 7vmin; pointer-events: none;
                   background: linear-gradient(#0b0d1400, #0b0d14ee); }
@@ -357,7 +416,7 @@
      landscape, and INSET so the system gesture bar cannot sit on top of them.
      That last part is the whole of the bug Anthony hit on the Samsung. */
   #gears { position: fixed; z-index: 30;
-           right: calc(10px + var(--sar)); top: 50%; transform: translateY(-50%);
+           right: calc(10px + var(--sar)); top: calc(var(--vph) / 2); transform: translateY(-50%);
            display: flex; flex-direction: column; gap: 8px; }
   body.inMenu #gears { display: none; }
   #gears button {

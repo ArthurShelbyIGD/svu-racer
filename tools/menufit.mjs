@@ -57,6 +57,28 @@ const SCREENS = [
   { name: "the Samsung, in-app browser", w: 592, h: 212, inset: { r: 44, l: 0, t: 0, b: 0 } },
   { name: 'the Samsung, gesture bar left', w: 592, h: 212, inset: { r: 0, l: 44, t: 0, b: 0 } },
   { name: 'notched iPhone, both sides', w: 844, h: 390, inset: { r: 50, l: 50, t: 0, b: 21 } },
+
+  // ---- AND THE ONE THAT WAS BROKEN, WHICH NOTHING ABOVE COULD SEE ---------
+  //
+  // `chrome` is the height of the browser's address bar, in CSS px. It is not
+  // the same thing as a smaller viewport, and that difference is the whole
+  // bug: with the bar showing, Android Chrome's LAYOUT viewport stays the full
+  // height, so `position: fixed; inset: 0` and `height: 100%` both extend
+  // behind the bar and off the bottom of the phone. Every row above passes
+  // because a headless browser has no address bar to overstate.
+  //
+  // Anthony hit it by switching tracks, which reloads — and a page load always
+  // drops fullscreen: "I get this weird thing going on with the screen... not
+  // really obvious how to get out of the situation, which is click the screen
+  // and hope it works." RACE and FULL SCREEN were below the fold.
+  //
+  // Faked by overriding --vph, the measured-visible-height property the
+  // stylesheet now sizes every fixed layer with. Same device, same numbers as
+  // the first row, plus a 52px bar and the gesture strip.
+  { name: "his phone, address bar showing", w: 720, h: 360, chrome: 52,
+    inset: { r: 30, l: 0, t: 0, b: 0 } },
+  { name: 'the Samsung, address bar showing', w: 592, h: 212, chrome: 46,
+    inset: { r: 44, l: 0, t: 0, b: 0 } },
 ];
 
 const b = await chromium.launch({
@@ -80,6 +102,17 @@ for (const s of SCREENS) {
       r.setProperty('--sab', i.b + 'px'); r.setProperty('--sal', i.l + 'px');
     }, s.inset);
   }
+  if (s.chrome) {
+    // Pinned AFTER the game's own resize handler has run, and re-pinned on a
+    // timer, because that handler writes --vph from visualViewport and would
+    // otherwise overwrite the fake on the next resize event.
+    await p.evaluate((c) => {
+      const set = () => document.documentElement.style.setProperty(
+        '--vph', (window.innerHeight - c) + 'px');
+      set();
+      setInterval(set, 100);
+    }, s.chrome);
+  }
   await p.waitForTimeout(700);
 
   for (const which of PANELS) {
@@ -101,7 +134,11 @@ for (const s of SCREENS) {
       const cs = getComputedStyle(document.documentElement);
       const num = (v) => parseFloat(cs.getPropertyValue(v)) || 0;
       const L = num('--sal'), R = num('--sar'), T = num('--sat'), B = num('--sab');
-      const W = window.innerWidth - R, H = window.innerHeight - B;
+      // HEIGHT FROM --vph, NOT innerHeight. innerHeight is the layout viewport
+      // and is exactly the number that lies when an address bar is showing —
+      // measuring against it would let the bug through while reporting a pass.
+      const vph = parseFloat(cs.getPropertyValue('--vph')) || window.innerHeight;
+      const W = window.innerWidth - R, H = vph - B;
       const panel = document.getElementById(id);
       let over = 0, overW = 0, overH = 0, minBtn = 1e9, minName = '';
       const walk = (el) => {

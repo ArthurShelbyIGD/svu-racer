@@ -460,6 +460,53 @@ left (fixed by not walking at all — the berth is dead straight by construction
 which is the same fact that lets the hull be rigid); and the bow was plated
 straight across, so the exit was a black wall.
 
+### 19 August: the menu fell off the bottom of the phone
+
+Anthony, after switching tracks: *"I get this weird thing going on with the
+screen... Looks a bit amateur the way it is and not really obvious how to get
+out of the situation, which is click the screen and hope it works."* RACE and
+FULL SCREEN were below the fold, so the only way out was to tap the canvas and
+hope the fullscreen request landed.
+
+**`height: 100%` and `position: fixed; inset: 0` both resolve against the
+LAYOUT viewport, and on Android Chrome that is the height with the address bar
+HIDDEN.** With the bar showing, every fixed layer on the page is taller than
+the screen. It never showed up because the game lives in fullscreen — and it
+appeared the moment the game was not, which is exactly what switching tracks
+does: a page load always drops fullscreen and no browser can be talked out of
+that.
+
+`vmin` lies for the same reason. On a landscape phone vmin IS the height, so
+every element sized in it was sized for a screen taller than the one it was on
+— fixing the container alone would only have moved the overflow inside it.
+
+So there are two measured properties now and everything is expressed in them:
+
+- `--vph` — the real visible height, from `visualViewport.height`, updated on
+  resize, on the visual viewport's own resize and scroll events, on rotate and
+  on fullscreen change. CSS `100svh` is the fallback.
+- `--vmn` — `min(100vw, var(--vph))`, i.e. vmin against a height that exists.
+
+**And it is testable, which was the actual difficulty.** No headless browser
+has an address bar, so every screen `tools/menufit.mjs` had ever been pointed
+at passed. It fakes one now by overriding `--vph`, the same trick it already
+used for the Android safe-area insets, and it measures the fit box against
+`--vph` rather than `innerHeight` — measuring against `innerHeight` would have
+let the bug straight through while printing a pass. Two rows added: his phone
+and the Samsung, each with a bar and a gesture strip. The Samsung with a bar is
+**166 usable pixels**, which took four more rounds of sizing to fit.
+
+The car and the "coming soon" prose are `flex: 0 1 auto; min-height: 0` now, so
+they give way when a screen is too short for everything — the correct order of
+sacrifice, and what the comment above `#mCar` had claimed the policy was for
+months without it ever being wired up. The 14px gap under the car did NOT give
+way: Anthony asked for that one by name.
+
+The front page also says what happened after a switch — *"changing track
+reloaded the page, so full screen came off — RACE puts it back"* — because RACE
+takes fullscreen on its way into the countdown, so there was never anything to
+fix, only something nobody had said.
+
 ## 4. Points and credits
 
 Earned by playing, in readiness for the garage. Bonuses for:

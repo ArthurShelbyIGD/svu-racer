@@ -207,10 +207,24 @@
   #mScrim { position: absolute; inset: 0;
             background: radial-gradient(120% 90% at 50% 42%, #0b0d1466 0%, #0b0d14dd 72%, #0b0d14f2 100%); }
 
+  /* ---- THE PADDING IS SYMMETRIC, AND THAT IS THE POINT -------------------
+     It used to be `3vmin + --sar` on the right and `3vmin + --sal` on the
+     left. Keeping system furniture out from under the buttons is exactly what
+     those insets are for — but applying them UNEQUALLY moves the whole block
+     off centre by half the difference, which is measurable and was measured:
+     a left inset of 80 shifts the menu 40px right of the middle of the screen.
+     Anthony: "make the menu center".
+
+     So both sides get the LARGER of the two. The block stays centred in the
+     screen whatever the phone reports, and it still clears the furniture on
+     whichever edge the furniture is on. It costs a little width on the clear
+     side, which is the right thing to spend to be centred. */
   .mPanel { position: absolute; inset: 0; display: none;
             flex-direction: column; align-items: center; justify-content: center;
-            padding: max(calc(var(--vmn) * 0.02), var(--sat)) calc(3vmin + var(--sar))
-                     max(calc(var(--vmn) * 0.02), var(--sab)) calc(3vmin + var(--sal)); }
+            padding: max(calc(var(--vmn) * 0.02), var(--sat), var(--sab))
+                     calc(3vmin + max(var(--sal), var(--sar)))
+                     max(calc(var(--vmn) * 0.02), var(--sat), var(--sab))
+                     calc(3vmin + max(var(--sal), var(--sar))); }
   .mPanel.on { display: flex; }
 
   /* SIZED FOR THE SHORTEST SCREEN THERE IS, which is a 592x212 CSS viewport —
@@ -380,6 +394,10 @@
   .sStep { min-width: max(40px, 8vmin); padding-left: 0; padding-right: 0; }
   .sVal { min-width: max(52px, 11vmin); text-align: center;
           font-size: max(10px, 2.2vmin); color: #9aa0ad; }
+  /* The diagnostic line. Small, wraps, and monospaced so digits line up in a
+     photograph — which is the only way it is ever going to be read. */
+  .sVal.sMono { font-size: max(9px, calc(var(--vmn) * 0.019)); line-height: 1.35;
+                white-space: normal; text-align: right; color: #8a8b93; }
   .sVal.sWide { min-width: max(76px, 16vmin); text-align: right; }
   #mFs { margin-top: 0.6vmin; font-size: max(9px, 2vmin); color: #6f7684;
          letter-spacing: 0.05em; text-align: center; }

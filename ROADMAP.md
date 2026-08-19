@@ -507,6 +507,42 @@ reloaded the page, so full screen came off — RACE puts it back"* — because R
 takes fullscreen on its way into the countdown, so there was never anything to
 fix, only something nobody had said.
 
+### 19 August, later: the menu was off-centre, and the fit rig could not see it
+
+Anthony: *"That made things even worse. Before it was only when I swapped
+tracks it pushed everything hard right but when a fresh load happened it was
+central. Now a fresh load and everything is pushed hard right."*
+
+**The panel's padding took the LEFT inset on the left and the RIGHT inset on
+the right.** That is what safe-area insets are for and it is the wrong way to
+apply them to a centred block: unequal padding moves the contents by half the
+difference. Measured, on a 480px screen: no insets puts the block dead centre
+at 240; a left inset of 80 puts it at 280. Both sides take the LARGER of the
+two now, so the block is centred whatever the phone reports and still clears
+the furniture on whichever edge it is on.
+
+**And `tools/menufit.mjs` never asked whether anything was CENTRED — only
+whether it FIT.** Those are different questions, and a block shoved a third of
+the way across the screen fits perfectly well. The rig passed every screen in
+its list, including a row called "the Samsung, gesture bar left" that has been
+there since the insets went in and was reproducing the bug on every run without
+anyone asking it the right question. There is an assertion for it now, on every
+screen, with two pixels of slack for sub-pixel rounding.
+
+**HONESTY ABOUT WHAT IS AND IS NOT PROVEN.** The asymmetry is real, measured,
+and fixed. It is probably not the whole of what Anthony photographed — the
+offset in his picture is several times larger than any plausible safe-area
+inset can produce, and nothing else in the stylesheet accounts for it. Rather
+than guess a fourth time there is now a **THIS SCREEN** row at the top of
+Settings that prints what the phone says about itself: both viewports, the
+visual viewport's offset and scale, the device pixel ratio, all four insets and
+the measured `--vph`. One photograph of that line settles it.
+
+Also fixed on the way past: the loop that fills the settings value cells from
+`read()` by key blanked the new row, because `read()` has no `screen` key and
+`undefined` stringifies to nothing. It skips keys the state object does not own
+now, which any future computed row would have needed.
+
 ## 4. Points and credits
 
 Earned by playing, in readiness for the garage. Bonuses for:

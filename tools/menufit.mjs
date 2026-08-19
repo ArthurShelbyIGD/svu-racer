@@ -115,6 +115,30 @@ for (const s of SCREENS) {
   }
   await p.waitForTimeout(700);
 
+  // ---- IS IT ACTUALLY IN THE MIDDLE? --------------------------------------
+  //
+  // Every check in this file asked whether things FIT. None asked whether they
+  // were CENTRED, and those are different questions: a block shoved a third of
+  // the way across still fits, and this rig passed every screen while
+  // Anthony's front page sat hard against the right edge of his phone.
+  //
+  // The cause found by measurement was the panel taking the LEFT inset on the
+  // left and the RIGHT inset on the right, which moves the contents by half
+  // the difference between them. That is symmetric now, and this is the
+  // assertion that stops it returning — it would have caught it the day the
+  // insets went in, because the 'gesture bar left' row has been in the screen
+  // list ever since.
+  {
+    const c = await p.evaluate(() => {
+      window.RACER.menu.open('pMain');
+      const g = document.getElementById('mGrid').getBoundingClientRect();
+      return { mid: (g.left + g.right) / 2, want: window.innerWidth / 2, w: g.width };
+    });
+    ok(Math.abs(c.mid - c.want) <= 2, `${s.name}: the menu block is centred`,
+       `middle at ${c.mid.toFixed(0)}px, screen middle ${c.want.toFixed(0)}px, ` +
+       `block ${c.w.toFixed(0)}px wide`);
+  }
+
   for (const which of PANELS) {
     const r = await p.evaluate((id) => {
       // Show the panel directly rather than clicking through to it: this test

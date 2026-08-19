@@ -288,6 +288,22 @@ export function buildMenu(api) {
   // or a stepper, and describing them as data means a new setting is one line
   // rather than a block of markup plus a block of wiring that can disagree.
   const ROWS = [
+    // WHAT THIS SCREEN SAYS IT IS, in its own words.
+    //
+    // Anthony's front page is pushed hard right on his phone and no amount of
+    // reading the stylesheet has explained it. An asymmetric safe-area inset
+    // WOULD do it and has been fixed — but the offset in his photograph is
+    // several times larger than any plausible inset, so the fix is a fix for
+    // something and possibly not for this.
+    //
+    // Rather than guess a fourth time, ask the phone. Every number the layout
+    // depends on, in one line he can screenshot: the two viewports, whether
+    // they agree, the scale, and the four insets. If they all read sensibly
+    // then the cause is somewhere I have not looked, and that is worth knowing
+    // in one round trip instead of five.
+    { k: 'screen', kind: 'info', label: 'THIS SCREEN',
+      note: 'What the phone reports about its own display. If the menu ever looks off-centre, ' +
+            'send a photo of this line.' },
     { k: 'sound', kind: 'sw', label: 'SOUND',
       note: 'The engine, the tyres and the countdown.' },
     { k: 'tilt', kind: 'sw', label: 'TILT STEERING',
@@ -315,7 +331,8 @@ export function buildMenu(api) {
     <div class="sRow">
       <div class="sText"><div class="sLabel">${r.label}</div><div class="sNote" data-n="${r.k}">${r.note}</div></div>
       <div class="sCtl">${
-        r.kind === 'sw' ? `<button class="mB sSw" data-k="${r.k}"></button>`
+        r.kind === 'info' ? `<span class="sVal sWide sMono" data-v="${r.k}"></span>`
+        : r.kind === 'sw' ? `<button class="mB sSw" data-k="${r.k}"></button>`
         : r.kind === 'act' ? `<span class="sVal sWide" data-v="${r.k}"></span>` +
                              `<button class="mB sAct" data-k="${r.k}">${r.act}</button>`
         : `<button class="mB sStep" data-k="${r.k}" data-d="-1">&minus;</button>` +
@@ -388,6 +405,23 @@ export function buildMenu(api) {
       b.classList.toggle('trkHere', here);
     }
 
+    // The numbers, straight from the browser, formatted to be readable in a
+    // photograph rather than to be pretty.
+    const sc = sBody.querySelector('.sVal[data-v="screen"]');
+    if (sc) {
+      const cs = getComputedStyle(document.documentElement);
+      const n = (v) => Math.round(parseFloat(cs.getPropertyValue(v)) || 0);
+      const vv = window.visualViewport;
+      sc.textContent =
+        `win ${window.innerWidth}x${window.innerHeight}` +
+        (vv ? `  vis ${Math.round(vv.width)}x${Math.round(vv.height)}` +
+              `  off ${Math.round(vv.offsetLeft)},${Math.round(vv.offsetTop)}` +
+              `  x${(vv.scale || 1).toFixed(2)}` : '  no visualViewport') +
+        `  dpr ${(window.devicePixelRatio || 1).toFixed(2)}` +
+        `  inset L${n('--sal')} R${n('--sar')} T${n('--sat')} B${n('--sab')}` +
+        `  vph ${n('--vph')}`;
+    }
+
     const tn = sBody.querySelector('.sNote[data-n="tilt"]');
     if (tn) {
       tn.textContent = TILT_NOTE[s.tiltPerm] || TILT_NOTE.granted;
@@ -450,7 +484,15 @@ export function buildMenu(api) {
       b.textContent = v ? 'ON' : 'OFF';
       b.classList.toggle('on', !!v);
     }
-    for (const v of sBody.querySelectorAll('.sVal')) v.textContent = s[v.dataset.v];
+    // SKIP THE ONES THE STATE OBJECT DOES NOT OWN. This loop fills every value
+    // cell from `read()` by key, which is right for the steppers — and it runs
+    // after the diagnostic row above and blanked it, because `read()` has no
+    // `screen` key and `undefined` stringifies to nothing. Any future row that
+    // computes its own text would have hit the same wall.
+    for (const v of sBody.querySelectorAll('.sVal')) {
+      const val = s[v.dataset.v];
+      if (val !== undefined) v.textContent = val;
+    }
   }
 
   /** Called by main.js the moment a lap ends. */

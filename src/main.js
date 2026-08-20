@@ -3570,21 +3570,44 @@ function applyFov(hFovDeg) {
  * load always drops fullscreen. The front page came back with RACE and FULL
  * SCREEN below the fold and no obvious way out.
  *
- * `visualViewport.height` is the honest number. Written into `--vph`, which
- * every fixed layer's height is expressed in — and because it is a custom
- * property a harness can override it, which is the only way to reproduce an
- * address bar in a headless browser. tools/menufit.mjs does exactly that, the
- * same way it fakes the Android safe-area insets.
+ * AND WIDTH, AND AN ORIGIN, which the first version of this did not do and
+ * which turned out to be the actual bug. Anthony's diagnostic row read
+ *
+ *     win 980x408   vis 672x280   off 0,0   x1.00   dpr 2.00   inset L0 R0
+ *
+ * 980 is Chrome's fallback layout width for a page it treats as a desktop
+ * site. The insets were ZERO, so the asymmetric-padding theory — real, and
+ * fixed — was not this. The page was laid out 980 wide and he could see 672 of
+ * it, so a menu centred at 490 sat at 490 in a window whose middle is 336.
+ * Correctly centred, in a viewport a third wider than the phone.
+ *
+ * So the layout viewport is not trusted for anything now. All four numbers
+ * come from `visualViewport`, the rectangle actually on the glass, and every
+ * fixed layer is positioned AND sized from them. One mechanism covers desktop
+ * mode, the address bar and pinch-zoom panning.
+ *
+ * Being custom properties, a harness can override all four — which is the only
+ * way to reproduce any of this headless. tools/menufit.mjs does exactly that,
+ * the same way it fakes the Android safe-area insets.
  */
-function applyViewportHeight() {
+function applyViewport() {
   const vv = window.visualViewport;
+  const w = Math.round(vv ? vv.width : window.innerWidth);
   const h = Math.round(vv ? vv.height : window.innerHeight);
-  if (h > 0) document.documentElement.style.setProperty('--vph', h + 'px');
-  return h;
+  const x = Math.round(vv ? vv.offsetLeft : 0);
+  const y = Math.round(vv ? vv.offsetTop : 0);
+  const r = document.documentElement.style;
+  if (w > 0 && h > 0) {
+    r.setProperty('--vpw', w + 'px');
+    r.setProperty('--vph', h + 'px');
+    r.setProperty('--vpx', x + 'px');
+    r.setProperty('--vpy', y + 'px');
+  }
+  return { w, h };
 }
 
 function resize() {
-  const w = window.innerWidth, h = applyViewportHeight();
+  const { w, h } = applyViewport();
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   applyFov(baseFov);

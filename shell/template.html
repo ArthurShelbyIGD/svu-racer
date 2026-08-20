@@ -60,17 +60,40 @@
      measured value can be OVERRIDDEN BY A HARNESS, and no headless browser has
      an address bar to reproduce the bug with. Same trick as the safe-area
      insets, which are faked by tools/menufit.mjs for the same reason. */
-  :root { --vph: 100svh; }
+  /* WIDTH TOO, AND AN ORIGIN, because the layout viewport can be a completely
+     different rectangle from the one the player is looking at.
+
+     Anthony's phone, straight off the diagnostic row in Settings:
+
+         win 980x408   vis 672x280   off 0,0   x1.00   dpr 2.00   inset L0 R0
+
+     980 is Chrome's fallback layout width for a page it is treating as a
+     desktop site, and it has nothing to do with safe-area insets — which read
+     ZERO, so the inset theory was wrong. The page was laid out 980 CSS px wide
+     and he was looking at 672 of them at 1:1, so a block centred at 490 landed
+     at 490 in a window whose middle is 336. That is the "pushed hard right",
+     exactly, and it is why it survived being centred: it WAS centred, in a
+     viewport a third wider than the phone.
+
+     So nothing here is allowed to trust the layout viewport any more. Every
+     fixed layer is positioned and sized from the VISUAL viewport — the
+     rectangle actually on the glass — and offset by where that rectangle sits.
+     That covers desktop-mode, the address bar, and pinch-zoom panning with one
+     mechanism, and it is why this is four properties rather than one. */
+  :root { --vpw: 100vw; --vph: 100svh; --vpx: 0px; --vpy: 0px; }
   @supports not (height: 100svh) { :root { --vph: 100vh; } }
+  /* Everything that must cover the screen says so with this. */
+  .vpFill { position: fixed; left: var(--vpx); top: var(--vpy);
+            width: var(--vpw); height: var(--vph); }
   /* AND vmin LIES FOR THE SAME REASON. On a landscape phone vmin IS the
      height, and it is the layout height — so with an address bar showing,
      every element sized in vmin is sized for a screen taller than the one it
      is on. Fixing the container without fixing the contents just moves the
      overflow inside. --vmn is vmin measured against the height that exists. */
-  :root { --vmn: min(100vw, var(--vph)); }
+  :root { --vmn: min(var(--vpw), var(--vph)); }
 
   html, body {
-    margin: 0; padding: 0; height: var(--vph); overflow: hidden;
+    margin: 0; padding: 0; width: 100%; height: var(--vph); overflow: hidden;
     background: #0b0d14; color: #e8e6df;
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
     /* Stops the browser from scrolling, rubber-banding or firing a
@@ -80,7 +103,11 @@
     -webkit-user-select: none; user-select: none;
     -webkit-tap-highlight-color: transparent;
   }
-  #c { display: block; width: 100%; height: var(--vph); }
+  /* The canvas is pinned to the visual viewport like everything else — at a
+     980px layout width it would otherwise be 980 wide with 308 of it off the
+     side of the phone. */
+  #c { display: block; position: fixed; left: var(--vpx); top: var(--vpy);
+       width: var(--vpw); height: var(--vph); }
 
   /* ---- the readout ----
      This is the entire point of the skeleton. It has to be legible on a small
@@ -94,7 +121,7 @@
        this was happening — an instrument that checks one edge and not the
        other. 196px is the grid at its widest (two 82px buttons, a 6px gap and
        its 8px right offset) plus a little air. */
-    position: fixed; top: 0; left: 0; right: 196px;
+    position: fixed; top: var(--vpy); left: var(--vpx); width: calc(var(--vpw) - 196px);
     padding: max(10px, var(--sat)) calc(12px + var(--sar)) 10px calc(12px + var(--sal));
     /* 11px, NOT 13. Measured on Anthony's phone: a 1440x720 canvas at dpr 2.00
        is a 360px-tall CSS viewport, and eighteen lines at 13px came to about
@@ -133,7 +160,8 @@
      The bottom corners are the brake and the boost now, and a test button you
      hit while braking is a test button in the wrong place. */
   #ctl {
-    position: fixed; right: calc(8px + var(--sar)); top: max(8px, var(--sat));
+    position: fixed; left: calc(var(--vpx) + var(--vpw) - 8px - var(--sar));
+    transform: translateX(-100%); top: calc(var(--vpy) + max(8px, var(--sat)));
     display: grid; grid-template-columns: repeat(2, auto);
     gap: 6px; z-index: 5;
   }
@@ -173,12 +201,14 @@
      tester says "it didn't work", and that one sentence covers a device too old
      for WebGL2, a half-finished download, and a mistake I made an hour ago.
      This turns all three into different sentences. */
-  #fail { display: none; position: fixed; left: 0; top: 0; right: 0; height: var(--vph); z-index: 99;
+  #fail { display: none; position: fixed; left: var(--vpx); top: var(--vpy);
+    width: var(--vpw); height: var(--vph); z-index: 99;
     background: #0b0d14; color: #e8e6df; padding: 18px;
     font-size: 13px; line-height: 1.6; overflow: auto; white-space: pre-wrap;
     word-break: break-word; }
   #fail b { color: #ff6b5e; font-size: 16px; }
-  #note { position: fixed; left: 0; right: 0; top: calc(var(--vph) - 2.6em);
+  #note { position: fixed; left: var(--vpx); width: var(--vpw);
+    top: calc(var(--vpy) + var(--vph) - 2.6em);
     padding: 10px calc(12px + var(--sar)) max(10px, var(--sab)) calc(12px + var(--sal));
     font-size: 12px; color: #8a8b93; text-align: center;
     background: linear-gradient(#0000, #000b); pointer-events: none; }
@@ -196,7 +226,8 @@
      means the menu shrinks when the address bar appears instead of running off
      the bottom, which is the failure the readout hit twice before it was
      measured. tools/menufit.mjs checks it on six screens. */
-  #menu { position: fixed; left: 0; top: 0; right: 0; height: var(--vph); display: none; z-index: 40;
+  #menu { position: fixed; left: var(--vpx); top: var(--vpy);
+          width: var(--vpw); height: var(--vph); display: none; z-index: 40;
           font-family: inherit; color: #e8e6df; overflow: hidden; }
   #menu.show { display: block; }
   /* The city sits under everything and is deliberately not sharp: it is a
@@ -434,7 +465,8 @@
      landscape, and INSET so the system gesture bar cannot sit on top of them.
      That last part is the whole of the bug Anthony hit on the Samsung. */
   #gears { position: fixed; z-index: 30;
-           right: calc(10px + var(--sar)); top: calc(var(--vph) / 2); transform: translateY(-50%);
+           left: calc(var(--vpx) + var(--vpw) - 10px - var(--sar));
+           top: calc(var(--vpy) + var(--vph) / 2); transform: translate(-100%, -50%);
            display: flex; flex-direction: column; gap: 8px; }
   body.inMenu #gears { display: none; }
   #gears button {

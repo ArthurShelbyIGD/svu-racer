@@ -543,6 +543,45 @@ Also fixed on the way past: the loop that fills the settings value cells from
 `undefined` stringifies to nothing. It skips keys the state object does not own
 now, which any future computed row would have needed.
 
+### 19 August, and the diagnostic row earned its keep on the first try
+
+Anthony's THIS SCREEN line, straight off his phone:
+
+```
+win 980x408   vis 672x280   off 0,0   x1.00   dpr 2.00   inset L0 R0
+```
+
+**980 is Chrome's fallback layout width for a page it is treating as a desktop
+site, and the insets are ZERO.** So the asymmetric-padding theory — real,
+measured, and fixed — was not this at all. The page was laid out 980 CSS px
+wide while he could see 672 of them at 1:1, so a menu block centred at 490 sat
+at 490 in a window whose middle is 336. It was *perfectly centred*, in a
+viewport a third wider than the phone. That is the whole of "pushed hard right",
+and it is why three rounds of centring work did not touch it.
+
+**Nothing trusts the layout viewport now.** There are four properties — `--vpw`,
+`--vph`, `--vpx`, `--vpy` — all read from `visualViewport`, which is the
+rectangle actually on the glass, and every fixed layer including the canvas is
+positioned AND sized from them. One mechanism covers desktop mode, the address
+bar and pinch-zoom panning, which is three bugs' worth of cause with one shape.
+
+**And the rig can now fail on purpose.** `tools/menufit.mjs` takes a path, so it
+can be pointed at an old build; against the pre-fix bundle the two new rows read
+
+```
+FAIL  desktop-mode: 980 laid out, 672 visible   middle at 490px, screen middle 336px
+FAIL  panned: 980 laid out, 672 visible at x=140   middle at 490px, screen middle 476px
+```
+
+which is Anthony's photograph, in numbers. Every row that existed before passes
+on both builds — none of them could see it, because none of them faked a visual
+viewport smaller than the layout one.
+
+*The lesson worth keeping:* three fixes went in on guesses and one of them made
+things worse. The fourth attempt started by asking the phone what it thought it
+was, and the answer took ten seconds to interpret. When a device-specific bug
+resists two attempts, stop fixing and start instrumenting.
+
 ## 4. Points and credits
 
 Earned by playing, in readiness for the garage. Bonuses for:

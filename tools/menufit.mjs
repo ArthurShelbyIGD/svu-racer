@@ -25,7 +25,13 @@ import { chromium } from '/root/svu-run/node_modules/playwright/index.mjs';
 import { fileURLToPath as __f } from 'node:url';
 import { dirname as __d, join as __j } from 'node:path';
 const ROOT = __d(__d(__f(import.meta.url)));
-const FILE = 'file://' + __j(ROOT, 'docs', 'index.html');
+// Overridable, so the rig can be pointed at an OLD build and made to fail on
+// purpose. A test that has only ever passed has not been shown to detect
+// anything — and this file spent months passing while Anthony's front page was
+// visibly wrong on his phone.
+//   node tools/menufit.mjs /tmp/old.html
+const FILE = process.argv[2] ? 'file://' + process.argv[2]
+                             : 'file://' + __j(ROOT, 'docs', 'index.html');
 
 const fails = [];
 const ok = (cond, label, detail = '') => {
@@ -79,6 +85,16 @@ const SCREENS = [
     inset: { r: 30, l: 0, t: 0, b: 0 } },
   { name: 'the Samsung, address bar showing', w: 592, h: 212, chrome: 46,
     inset: { r: 44, l: 0, t: 0, b: 0 } },
+
+  // AND THE ONE OFF ANTHONY'S OWN DIAGNOSTIC ROW. Laid out 980x408, looking at
+  // 672x280 of it. Zero insets — which is exactly why every row above passed
+  // while his phone was visibly wrong.
+  { name: 'desktop-mode: 980 laid out, 672 visible', w: 980, h: 408,
+    vp: { w: 672, h: 280, x: 0, y: 0 } },
+  // And the same with the visible rectangle panned off the origin, which is
+  // what pinch-zoom does and what nothing here has ever exercised.
+  { name: 'panned: 980 laid out, 672 visible at x=140', w: 980, h: 408,
+    vp: { w: 672, h: 280, x: 140, y: 40 } },
 ];
 
 const b = await chromium.launch({
@@ -101,6 +117,33 @@ for (const s of SCREENS) {
       r.setProperty('--sat', i.t + 'px'); r.setProperty('--sar', i.r + 'px');
       r.setProperty('--sab', i.b + 'px'); r.setProperty('--sal', i.l + 'px');
     }, s.inset);
+  }
+  // ---- A LAYOUT VIEWPORT WIDER THAN THE PHONE ------------------------------
+  //
+  // `vp` fakes the visual viewport: the rectangle actually on the glass, which
+  // can be a sub-rectangle of the one the page is laid out in. Anthony's phone
+  // reported `win 980x408  vis 672x280` — Chrome's desktop-site fallback — so
+  // the menu was centred at 490 in a window whose middle is 336, and looked
+  // shoved against the right-hand edge. His safe-area insets were zero, so
+  // none of the inset rows above could ever have caught it.
+  //
+  // Overriding the four properties is the only way to reproduce it headless,
+  // and it is the same trick this file already uses for the insets and the
+  // address bar. Everything on the page is positioned and sized from them now,
+  // so faking them here is faking the real thing rather than an analogy.
+  if (s.vp) {
+    await p.evaluate((v) => {
+      const r = document.documentElement.style;
+      const set = () => {
+        r.setProperty('--vpw', v.w + 'px'); r.setProperty('--vph', v.h + 'px');
+        r.setProperty('--vpx', (v.x || 0) + 'px'); r.setProperty('--vpy', (v.y || 0) + 'px');
+      };
+      set();
+      setInterval(set, 100);
+      // And the fit box has to be measured against the same rectangle.
+      window.__vp = v;
+    }, s.vp);
+    await p.waitForTimeout(300);
   }
   if (s.chrome) {
     // Pinned AFTER the game's own resize handler has run, and re-pinned on a
@@ -132,7 +175,11 @@ for (const s of SCREENS) {
     const c = await p.evaluate(() => {
       window.RACER.menu.open('pMain');
       const g = document.getElementById('mGrid').getBoundingClientRect();
-      return { mid: (g.left + g.right) / 2, want: window.innerWidth / 2, w: g.width };
+      const v = window.__vp;
+      // Centred in the rectangle the PLAYER can see, not the one the page was
+      // laid out in — which on a desktop-mode phone are a third apart.
+      const x0 = v ? (v.x || 0) : 0, w = v ? v.w : window.innerWidth;
+      return { mid: (g.left + g.right) / 2, want: x0 + w / 2, w: g.width };
     });
     ok(Math.abs(c.mid - c.want) <= 2, `${s.name}: the menu block is centred`,
        `middle at ${c.mid.toFixed(0)}px, screen middle ${c.want.toFixed(0)}px, ` +
@@ -162,7 +209,10 @@ for (const s of SCREENS) {
       // and is exactly the number that lies when an address bar is showing —
       // measuring against it would let the bug through while reporting a pass.
       const vph = parseFloat(cs.getPropertyValue('--vph')) || window.innerHeight;
-      const W = window.innerWidth - R, H = vph - B;
+      const vpw = parseFloat(cs.getPropertyValue('--vpw')) || window.innerWidth;
+      const vpx = parseFloat(cs.getPropertyValue('--vpx')) || 0;
+      const vpy = parseFloat(cs.getPropertyValue('--vpy')) || 0;
+      const W = vpx + vpw - R, H = vpy + vph - B;
       const panel = document.getElementById(id);
       let over = 0, overW = 0, overH = 0, minBtn = 1e9, minName = '';
       const walk = (el) => {
@@ -173,9 +223,9 @@ for (const s of SCREENS) {
         const scroller = el.id === 'sBody' || el.closest('#sBody');
         if (!scroller) {
           if (q.right > W + 0.5) { over++; overW = Math.max(overW, q.right - W); }
-          if (q.left < L - 0.5) { over++; overW = Math.max(overW, L - q.left); }
+          if (q.left < vpx + L - 0.5) { over++; overW = Math.max(overW, vpx + L - q.left); }
           if (q.bottom > H + 0.5) { over++; overH = Math.max(overH, q.bottom - H); }
-          if (q.top < T - 0.5) { over++; overH = Math.max(overH, T - q.top); }
+          if (q.top < vpy + T - 0.5) { over++; overH = Math.max(overH, vpy + T - q.top); }
         }
         if (el.tagName === 'BUTTON') {
           const side = Math.min(q.width, q.height);

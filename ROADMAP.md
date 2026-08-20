@@ -582,6 +582,47 @@ things worse. The fourth attempt started by asking the phone what it thought it
 was, and the answer took ten seconds to interpret. When a device-specific bug
 resists two attempts, stop fixing and start instrumenting.
 
+### Getting ready to share it — 20 August
+
+Anthony: *"I'll most likely share a link to the game soon and get some feedback
+on how it drives and so on. Other players will turn up things I can't find
+that's for sure so I'm keen to move to this stage before we invest time in a
+points system, garage etc."*
+
+Right call, and the ordering is the point: a points system built before anyone
+outside the family has driven the thing is a system built on one person's
+guesses about what is fun.
+
+Two things went in for it.
+
+**SCREEN INFO moved to the bottom of Settings** and is worded for a stranger.
+It solved the off-centre menu in one round trip after three guesses had failed,
+so it stays — but a new player should not open Settings and meet a wall of
+viewport arithmetic.
+
+**And the build stamp is a hash of the BUNDLE now, not of the commit.** The
+commit hash was exact and free and pointed at nothing: this game is built in a
+throwaway cloud container that gets reclaimed every few hours, each recovery
+starts a fresh `git init`, so the hash in a shipped build referred to a commit
+that exists in no repository anywhere — while looking authoritative enough that
+someone would try to match it against GitHub and conclude the download was
+corrupt. A content hash cannot lie: two testers on the same file report the same
+eight characters, and it needs no repository to mean something. It is on the
+SCREEN INFO line as well as the numbers panel, because the first thing any bug
+report needs is which build produced it.
+
+**What is worth asking testers**, given what this project has learned about
+where its bugs actually live:
+
+- What phone, and does the layout look right — anything cut off or off to one
+  side. Three of the last four bugs were layout on a device nobody here owns.
+- Does tilt steering work, and did a permission prompt appear. iOS has its own
+  answer and it is the one that nearly killed the project.
+- Is it smooth, and if not, does turning CITY down in Settings fix it. That
+  dial exists to find the breaking point on hardware we cannot buy.
+- Which track, and what lap time. A time is a compact summary of whether the
+  car, the corners and the nitrous are all behaving.
+
 ## 4. Points and credits
 
 Earned by playing, in readiness for the garage. Bonuses for:

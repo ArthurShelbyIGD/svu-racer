@@ -288,22 +288,6 @@ export function buildMenu(api) {
   // or a stepper, and describing them as data means a new setting is one line
   // rather than a block of markup plus a block of wiring that can disagree.
   const ROWS = [
-    // WHAT THIS SCREEN SAYS IT IS, in its own words.
-    //
-    // Anthony's front page is pushed hard right on his phone and no amount of
-    // reading the stylesheet has explained it. An asymmetric safe-area inset
-    // WOULD do it and has been fixed — but the offset in his photograph is
-    // several times larger than any plausible inset, so the fix is a fix for
-    // something and possibly not for this.
-    //
-    // Rather than guess a fourth time, ask the phone. Every number the layout
-    // depends on, in one line he can screenshot: the two viewports, whether
-    // they agree, the scale, and the four insets. If they all read sensibly
-    // then the cause is somewhere I have not looked, and that is worth knowing
-    // in one round trip instead of five.
-    { k: 'screen', kind: 'info', label: 'THIS SCREEN',
-      note: 'What the phone reports about its own display. If the menu ever looks off-centre, ' +
-            'send a photo of this line.' },
     { k: 'sound', kind: 'sw', label: 'SOUND',
       note: 'The engine, the tyres and the countdown.' },
     { k: 'tilt', kind: 'sw', label: 'TILT STEERING',
@@ -324,6 +308,20 @@ export function buildMenu(api) {
             'if yours does, open the link in Chrome or Safari instead.' },
     { k: 'readout', kind: 'sw', label: 'SHOW THE NUMBERS',
       note: 'Frame rate, draw calls and triangles, over the track. For sending back test data.' },
+    // ---- LAST, AND IT BELONGS LAST -------------------------------------
+    //
+    // This is the row that solved the off-centre menu in one round trip after
+    // three guesses had failed and one had made it worse, so it stays. But it
+    // went in at the TOP while I was chasing that, and the first thing a new
+    // player met in Settings was a wall of viewport arithmetic. Anthony, about
+    // to share the link: "so a player isn't immediately confronted by it."
+    //
+    // Bottom of the list is the right place for a thing that is useless until
+    // something is wrong and invaluable the moment it is — and the wording is
+    // for a stranger now, because a stranger is who will be reading it.
+    { k: 'screen', kind: 'info', label: 'SCREEN INFO',
+      note: 'Only useful if something looks wrong. If the layout is off or the game ' +
+            'will not fit, send this line along with what you saw.' },
   ];
 
   const sBody = $('sBody');
@@ -412,7 +410,12 @@ export function buildMenu(api) {
       const cs = getComputedStyle(document.documentElement);
       const n = (v) => Math.round(parseFloat(cs.getPropertyValue(v)) || 0);
       const vv = window.visualViewport;
+      // THE BUILD GOES ON THIS LINE TOO. It is otherwise only on the numbers
+      // panel, which a tester has to know to switch on — and the first thing
+      // any bug report needs is which build produced it.
+      const dev = window.__DEVICE || {};
       sc.textContent =
+        `build ${dev.build || '?'}\n` +
         `win ${window.innerWidth}x${window.innerHeight}` +
         (vv ? `  vis ${Math.round(vv.width)}x${Math.round(vv.height)}` +
               `  off ${Math.round(vv.offsetLeft)},${Math.round(vv.offsetTop)}` +

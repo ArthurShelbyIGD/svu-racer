@@ -42,14 +42,22 @@ if (!template.includes(MARKER)) throw new Error(`template is missing ${MARKER}`)
 // tester in a Discord has whatever file they downloaded whenever they
 // downloaded it — and the fourth screenshot in a thread is worthless if nobody
 // can say which build produced it. The commit hash is exact and free.
-let stamp = 'nogit';
-try {
-  const { execSync } = await import('node:child_process');
-  const hash = execSync('git rev-parse --short HEAD', { cwd: ROOT }).toString().trim();
-  const dirty = execSync('git status --porcelain', { cwd: ROOT }).toString().trim() ? '+' : '';
-  stamp = hash + dirty;
-} catch (e) { /* not a repo, or no git; the placeholder says so honestly */ }
-stamp += ' ' + new Date().toISOString().slice(0, 16).replace('T', ' ');
+// A HASH OF THE BUNDLE, NOT OF THE COMMIT, and the difference matters now that
+// the link is going out to strangers.
+//
+// The commit hash was exact and free and pointed at nothing. This game is built
+// in a throwaway cloud container that gets reclaimed every few hours; each
+// recovery starts a fresh `git init`, so the hash in a shipped build refers to
+// a commit that exists in no repository on earth — and it looks authoritative
+// enough that someone would try to match it against GitHub and conclude the
+// build was corrupt.
+//
+// The bundle's own content hash cannot lie. Two testers on the same file report
+// the same eight characters, a changed file always reports different ones, and
+// it needs no repository to be meaningful.
+const { createHash } = await import('node:crypto');
+const stamp = createHash('sha256').update(js).digest('hex').slice(0, 8) +
+              ' ' + new Date().toISOString().slice(0, 16).replace('T', ' ');
 
 const html = template.replace(MARKER, () => js).split('__BUILD__').join(stamp);
 

@@ -29,15 +29,22 @@
 // rather than a mismatch in where the camera was standing.
 
 import { chromium } from '/root/svu-run/node_modules/playwright/index.mjs';
-import { readFileSync } from 'node:fs';
-import { PNG } from 'pngjs';
+// The cutting, scaling and IoU are shared with tools/faultmap.mjs, so that the
+// picture of where the score is lost explains THIS number and not another one.
+import { refMask, carAspect, normalise, mirror, iou } from './lib/silmask.mjs';
 import { fileURLToPath as __f } from 'node:url';
 import { dirname as __d, join as __j } from 'node:path';
 // THE HARNESS MUST MEASURE THE BUILD NEXT TO IT, not a fixed path. These tools
 // hard-coded /root/racer, so an agent working in a git worktree would have
 // photographed master's car and graded its own work by someone else's frame.
 const __ROOT = __d(__d(__f(import.meta.url)));
-const PAGE = 'file://' + __j(__ROOT, 'docs', 'index.html');
+// WHICH CANDIDATE TO SCORE. `node tools/silhouette.mjs a` photographs the car
+// that src/car/body-a.js builds; with no argument it scores the shipped one.
+// Identical conditions for every candidate is the whole point of a rival-cars
+// process, so the pose search, the references and the scaling all stay put and
+// only the builder changes.
+const BODY = process.argv[2] || '';
+const PAGE = 'file://' + __j(__ROOT, 'docs', 'index.html') + (BODY ? '?body=' + BODY : '');
 const SHOTS = __j(__ROOT, 'shots');
 
 
@@ -86,123 +93,49 @@ const SHOTS = __j(__ROOT, 'shots');
 // photographed with a wider lens than any of these three drawings uses — the
 // near end comes out nearly twice the size of the far end — and perspective
 // distortion is not shape, which is the one thing this file exists to measure.
+// THE TABLE WAS POINTING AT TWO FILES THAT NO LONGER EXIST, and the run died
+// on the second one — so for weeks this reported a single score and then a
+// stack trace, and the single score it did report was the EASIEST view there
+// is. A car seen from dead astern is close to a rectangle; ours scores 93%
+// against the drawing and that number cannot tell anyone whether the car looks
+// like a Camaro.
+//
+// THE SIDE VIEW IS THE ONE THAT SETTLES IT, and it was never in this list.
+// Anthony went and made a clean dead-side-on cut-out specifically because a
+// three-quarter view cannot settle proportion — ref/REFERENCE.md says so at
+// length and gives the hard number, 3.243 of length to height — and then the
+// instrument that grades the car never looked at it.
+//
+// AND THEN IT LOOKED AT IT FROM THE WRONG SIDE. Three agents, working
+// independently on three separate car bodies, each reported the same thing: the
+// side score would not go past about 81% however good the body was, because the
+// drawing and the render are MIRROR IMAGES of each other. ref/side-nobg.png has
+// the nose at screen LEFT; az +PI/2 puts the camera on the car's right flank,
+// where the nose comes out at screen RIGHT.
+//
+// The geometry, so the sign is derived rather than guessed: the car's nose
+// points down -Z and the camera sits at (sin az, ., cos az) * dist. At az +PI/2
+// the camera is at +X, which is the car's right-hand side, and its screen-right
+// axis is -Z — the nose. At az -PI/2 the camera is at -X, screen-right is +Z,
+// and the nose falls to screen left, the way the drawing has it.
+//
+// A near-perfect replica scored against a mirror of itself was capped at 80.9%,
+// which this file was calling POOR. That is not a small calibration error: it
+// meant every candidate body was being graded on how well it matched a drawing
+// of a DIFFERENT car, and the differences it was rewarding were arbitrary. The
+// mirror guard below now measures the thing directly and says so out loud, so
+// this cannot come back silently if someone flips a sign or a reference.
 const REFS = [
   // az/el in radians; az 0 looks at the car's tail, positive swings to its left
-  { name: 'rear, no background', file: 'ref/rear-nobg-crop.png', az: 0.00, el: 0.10, ceiling: 1.000 },
-  { name: 'rear three-quarter', file: 'ref/camaro-rear34.png', az: 0.58, el: 0.13, ceiling: 0.824 },
-  { name: 'front three-quarter', file: 'ref/camaro-plain.png', az: 3.68, el: 0.11, ceiling: 0.845 },
+  { name: 'side on — the proportion reference', file: 'ref/side-nobg.png',
+    az: -Math.PI / 2, el: 0.02, ceiling: 1.000, wide: true },
+  { name: 'rear, no background', file: 'ref/rear-nobg-crop.png',
+    az: 0.00, el: 0.10, ceiling: 1.000 },
 ];
 
 /** How far the camera stands off, in world units. */
 const DISTANCES = [11, 14, 17];
 
-/** Cut the drawing out of its white background. */
-function refMask(path) {
-  const png = PNG.sync.read(readFileSync(path));
-  const { width: w, height: h, data } = png;
-  const m = new Uint8Array(w * h);
-  // ALPHA WINS WHERE THERE IS ALPHA. A cut-out PNG stores fully transparent
-  // pixels as rgba(0,0,0,0), and rgb 0,0,0 is the darkest thing there is — so
-  // reading colour alone would have marked the entire empty canvas as car and
-  // scored a perfect match against a rectangle. Detected rather than assumed:
-  // if any pixel is transparent, the file is a cut-out and alpha is the mask.
-  let hasAlpha = false;
-  for (let i = 3; i < data.length; i += 4) if (data[i] < 250) { hasAlpha = true; break; }
-  if (hasAlpha) {
-    for (let i = 3, p = 0; i < data.length; i += 4, p++) m[p] = data[i] > 128 ? 1 : 0;
-    return { m, w, h, hasAlpha };
-  }
-  for (let i = 0, p = 0; i < data.length; i += 4, p++) {
-    // Anything meaningfully darker than paper. The references are line art on
-    // white, so this is unambiguous — but exclude the drop shadow, which is a
-    // pale grey smear under the car and is not part of its shape.
-    const r = data[i], g = data[i + 1], b = data[i + 2];
-    const lum = (r + g + b) / 3;
-    const sat = Math.max(r, g, b) - Math.min(r, g, b);
-    m[p] = (lum < 215 && (lum < 150 || sat > 18)) ? 1 : 0;
-  }
-  return { m, w, h, hasAlpha };
-}
-
-/**
- * THE ASPECT OF THE DRAWN CAR, WITH ITS CAST SHADOW LEFT OUT.
- *
- * The mask above keeps the shadow on purpose — it is black, the IoU cannot tell
- * it from ink, and the per-reference ceiling is exactly the price of that. But
- * the ASPECT line is a different question. It asks whether our car is the same
- * proportion as the drawn car, and a shadow is not part of the drawn car:
- *
- *     camaro-rear34   mask bbox 878 x 423  aspect 2.08
- *                     car only  864 x 354  aspect 2.44   (65 rows are shadow)
- *     camaro-plain    mask bbox 868 x 407  aspect 2.13
- *                     car only  854 x 345  aspect 2.48   (62 rows are shadow)
- *
- * So the guard was demanding that our shadowless car be fifteen to nineteen
- * percent squatter than the drawing it is copying. A pixel-perfect replica
- * would have been reported at seventeen percent drift and called a cheat, and
- * the box car passed this line at 6.7% while being sixty percent too wide —
- * the check has never once caught what it is for.
- *
- * The shadow is separated the way the drawing separates it: it is grey and the
- * car is coloured. The cut-out has no shadow and real alpha, so nothing changes
- * there and it remains the reference that means what it says.
- */
-function carAspect(path, mask, w, h) {
-  const png = PNG.sync.read(readFileSync(path));
-  const { data } = png;
-  let x0 = 1e9, x1 = -1, y0 = 1e9, y1 = -1;
-  let any = false;
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const i = (y * w + x) * 4;
-      if (!mask[y * w + x]) continue;
-      const r = data[i], g = data[i + 1], b = data[i + 2];
-      if (Math.max(r, g, b) - Math.min(r, g, b) <= 30) continue;   // grey: shadow
-      any = true;
-      if (x < x0) x0 = x;
-      if (x > x1) x1 = x;
-      if (y < y0) y0 = y;
-      if (y > y1) y1 = y;
-    }
-  }
-  return any ? (x1 - x0 + 1) / (y1 - y0 + 1) : null;
-}
-
-/** Scale a mask into a fixed box, keeping only its bounding content. */
-function normalise(mask, w, h, N = 128) {
-  let x0 = 1e9, y0 = 1e9, x1 = -1, y1 = -1;
-  // Column and row histograms, so a few stray pixels cannot define the box.
-  const col = new Int32Array(w), row = new Int32Array(h);
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (mask[y * w + x]) { col[x]++; row[y]++; }
-  const span = (hist, n, floor) => {
-    let a = 0, b = n - 1;
-    while (a < n && hist[a] < floor) a++;
-    while (b > a && hist[b] < floor) b--;
-    return [a, b];
-  };
-  [x0, x1] = span(col, w, 3);
-  [y0, y1] = span(row, h, 3);
-  const bw = x1 - x0 + 1, bh = y1 - y0 + 1;
-  const out = new Uint8Array(N * N);
-  for (let y = 0; y < N; y++) {
-    const sy = y0 + Math.floor((y + 0.5) * bh / N);
-    for (let x = 0; x < N; x++) {
-      const sx = x0 + Math.floor((x + 0.5) * bw / N);
-      out[y * N + x] = mask[sy * w + sx];
-    }
-  }
-  return { out, aspect: bw / bh };
-}
-
-function iou(a, b, N = 128) {
-  let inter = 0, union = 0;
-  for (let i = 0; i < N * N; i++) {
-    const p = a[i], q = b[i];
-    if (p | q) union++;
-    if (p & q) inter++;
-  }
-  return union ? inter / union : 0;
-}
 
 const browser = await chromium.launch({
   executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
@@ -227,7 +160,7 @@ async function ourMask(az, el, dist) {
     const A = new Uint8Array(w * h * 4), B = new Uint8Array(w * h * 4);
     const f = () => new Promise((r) => requestAnimationFrame(() => r()));
     R.tune.freeze = true; R.st.speed = 0; R.st.steer = 0; R.st.slope = 0;
-    R.tune.studio = { az, el, dist };
+    R.tune.studio = { az, el, dist, clean: true };
     await f(); await f();
     gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, A);
     R.tune.showBody = false;
@@ -268,8 +201,13 @@ console.log('Both cut out and scaled to the same box, so this is shape, not size
 let worst = 1;
 let worstRel = 1;
 let aspectFail = false;
+let mirrorFail = false;
 for (const r of REFS) {
   const ref = refMask(r.file);
+  if (!ref) {
+    console.log(`  ${r.name.padEnd(22)}  SKIPPED — ${r.file} is not there`);
+    continue;
+  }
   const rn = normalise(ref.m, ref.w, ref.h);
   // A CUT-OUT HAS NOTHING TO SEPARATE. Its alpha already excludes everything
   // that is not car, so its mask aspect IS the drawn car's; running the
@@ -297,6 +235,19 @@ for (const r of REFS) {
   // Search a small neighbourhood of the nominal pose, so the score reports a
   // difference in SHAPE rather than a difference in where the camera stood.
   let best = { score: -1 };
+  // THE MIRROR GUARD. Scored against the drawing AND against the drawing
+  // reversed, every pose, at no extra render cost — the expensive part is the
+  // photograph, and this is one more IoU over a 128x128 bitmap.
+  //
+  // Two numbers come out of it. `selfMirror` is the drawing against its own
+  // reflection: the score a PERFECT replica would get if the camera were on the
+  // wrong flank, and therefore the exact ceiling of the bug. `bestFlip` is our
+  // car against the reflection. If bestFlip beats best, the camera is on the
+  // wrong side and every score in this table is meaningless — which is the
+  // condition that went unnoticed for the whole life of this file.
+  const rmirror = mirror(rn.out);
+  const selfMirror = iou(rn.out, rmirror);
+  let bestFlip = -1;
   // Coarse: this runs under a software renderer, and 45 poses per reference
   // takes longer than the measurement is worth. Nine is enough to stop a small
   // camera mismatch masquerading as a shape difference.
@@ -306,6 +257,7 @@ for (const r of REFS) {
         const o = await ourMask(r.az + daz, r.el + del, dist);
         const on = normalise(Uint8Array.from(o.m), o.w, o.h);
         const s = iou(rn.out, on.out);
+        bestFlip = Math.max(bestFlip, iou(rmirror, on.out));
         if (s > best.score) best = { score: s, daz, del, dist, aspect: on.aspect };
       }
     }
@@ -327,6 +279,14 @@ for (const r of REFS) {
   const drift = refAspect === null ? null : Math.abs(best.aspect - refAspect) / refAspect;
   console.log(`  ${r.name.padEnd(22)} ${(100 * best.score).toFixed(1)}%   ${verdict}` +
               `   (ceiling ${(100 * r.ceiling).toFixed(1)}%, ${(100 * rel).toFixed(0)}% of it)`);
+  if (bestFlip > best.score + 0.02) {
+    mirrorFail = true;
+    console.log(`  ${''.padEnd(22)} <-- WRONG FLANK: ${(100 * bestFlip).toFixed(1)}% against this ` +
+                `drawing REVERSED. Turn the camera round; this score is not a shape.`);
+  } else {
+    console.log(`  ${''.padEnd(22)} mirror check ${(100 * bestFlip).toFixed(1)}% reversed ` +
+                `(drawing vs its own mirror ${(100 * selfMirror).toFixed(1)}% — the wrong-flank ceiling)`);
+  }
   if (drift === null) {
     console.log(`  ${''.padEnd(22)} aspect ours ${best.aspect.toFixed(2)}` +
                 `  (drawing's ${rn.aspect.toFixed(2)} includes its cast shadow — not graded)`);
@@ -340,5 +300,6 @@ for (const r of REFS) {
 console.log('\n  Scored against each drawing\'s own measured ceiling, not against 100.');
 console.log(`  worst view: ${(100 * worst).toFixed(1)}%, ${(100 * worstRel).toFixed(0)}% of its ceiling`);
 if (aspectFail) console.log('  ASPECT DRIFT: the score is being bought with proportion, not shape.');
+if (mirrorFail) console.log('  MIRRORED: a camera on the wrong flank. Fix the pose before reading anything above.');
 await browser.close();
 process.exit(worstRel >= 0.93 && !aspectFail ? 0 : 1);

@@ -623,6 +623,166 @@ where its bugs actually live:
 - Which track, and what lap time. A time is a compact summary of whether the
   car, the corners and the nitrous are all behaving.
 
+### 20 August: three rival cars, and the ruler was holding the drawing backwards
+
+Anthony: *"How about we spin up a couple of agents and get to work on the car
+using the images in my downloads as a hard geometry reference... it's probably a
+good idea to model the car and produce screenshots but leave 3rd person switched
+off until we are happy with the model."* Asked how, he chose **rival cars, best
+wins** — three agents each building a complete body, scored, winner taken.
+
+They were given the same contract (`buildBody(o)` returning group, attach,
+parts, spec, stats), the same references, the same scorer, and no sight of each
+other's work. `src/car/bodies.js` picks between them on `?body=`, so all four
+cars are one query string apart on the phone.
+
+**And all three came back reporting the same bug in the instrument.**
+`ref/side-nobg.png` is drawn with the nose at screen LEFT — the car's left
+flank. `tools/silhouette.mjs` photographed `az: +Math.PI / 2`, which stands on
+the car's RIGHT. Every side score this project has ever printed was a car
+compared against a mirror image of the car it is copying. The ceiling of that
+comparison is not 100%: the drawing scored against its own reflection is
+**80.9%**, and the file was calling 81% POOR.
+
+Three independent agents finding one bug is worth more than any of them finding
+it alone, and none of them could fix it — it was not their file. That is the
+process working: an agent that cannot edit the ruler cannot bend it.
+
+The sign is now derived in the comments rather than guessed, and a **mirror
+guard** scores every reference against its own reflection as well as ours. If
+the flipped score ever beats the straight one by two points it prints WRONG
+FLANK and tells you to stop reading the table. Proved in both directions:
+silent on the fix, and against a deliberately re-broken copy it fires and
+reproduces the old 81.3% exactly.
+
+**A second harness bug turned up while taking the pictures.** The studio camera
+stands off the road at ground level, which on MIDNIGHT MILE puts it inside a
+building; the first side-on photograph of the winning car was a picture of a
+wall. It had been bending the scores too — the silhouette is isolated by
+DIFFING two renders, so an occluder does not appear in the mask, it deletes the
+car behind it, and two of the three camera distances were coming back blank.
+Studio mode now empties the room behind a `clean` flag.
+
+Scored after both fixes, worst view first:
+
+|       | side  | rear  | side aspect (3.27) | rear aspect (1.35) | tris   |
+|-------|-------|-------|--------------------|--------------------|--------|
+| stock | 84.2% | 93.3% | 3.90 — 19% off     | 1.38               | 10,216 |
+| a     | 94.2% | 95.5% | 3.28               | 1.37               | 10,184 |
+| **b** | **95.6%** | 95.4% | **3.25**       | **1.35**           | **9,464** |
+| c     | 95.0% | 95.6% | 3.37               | 1.42               | 10,008 |
+
+**b ships.** It wins the view that settles proportion, ties the rear to within a
+tenth of a point, is the only one whose rear aspect lands exactly on the
+drawing's, and is the cheapest of the three by five hundred triangles. Still
+three draw calls, ink 34.4% against a 34–44% band, and both tracks' full check
+passes unchanged at 9 and 13 calls.
+
+`tools/carmodel.mjs` is new: the same studio rig as the scorer, six angles,
+saved as PNGs — because a number is not a look, and 95.6% cannot tell anyone
+whether the roofline reads right on a phone.
+
+**Third person stays off**, as asked, until Anthony has looked at the pictures.
+
+### 20 August, later: the score was 95.4% and the car was still wrong
+
+Anthony, on the winner of round one: *"It's definitely better than the old car
+but I think we can push it further... the roof extends to quite close to the
+center of the rear wheel before it drops off to the boot, whereas the model's
+roof starts dropping off in front of the rear wheel. The front quarter light is
+too large and the rear quarter light is missing... the rear screen extends up
+too far... the rear bodywork is kind of two pieces and the top part is way too
+tall and the roof isn't visible above the rear screen. Rear lights are also the
+wrong proportions... Not certain how the score relates to 95.4% if I am brutally
+honest."*
+
+He was right, and the answer is not a defence of the number but a statement of
+its scope. **The silhouette mask is SOLID** — measured, three stray holes in the
+drawing and one in ours out of sixteen thousand cells. A window is inside the
+outline. So is a rear screen, so is a taillamp. Four of his five faults were
+worth *exactly zero points* to the instrument that graded the car, and the fifth
+was smeared across a single number covering the whole car. 95.4% never meant
+"the car is 95% right"; it meant "the car's outline is 95% right", and nobody
+had ever said so out loud.
+
+Two new instruments, and then a second round of rival cars.
+
+**`tools/faultmap.mjs`** draws the disagreement instead of summing it: red where
+the drawing has car and we do not, blue the other way, plus an 8x3 grid of where
+the missing percent actually sits. It also counts the holes in both masks, which
+is what turns "a silhouette cannot see interior detail" from an assertion into a
+measurement.
+
+**`tools/landmarks.mjs`** measures the five faults directly, with ONE colour
+rule applied identically to the drawing and to a render — glass is blue-beats-
+red where red does not beat green, lamp is red-beats-both. The second clause of
+the glass rule is load-bearing: the purple stripe's blue beats its red, so
+without it every stripe on the car scores as a window.
+
+Controls both ways, as usual. Positive: the same drawing resampled to 60% moves
+the worst landmark by 0.014 and does not change the pane count, so nothing in
+there is secretly counting pixels. Negative: stock 11 faults, a 9, b 6, c 5.
+
+**Then two agents revised the car, blind to each other, and both found bugs in
+the instruments they were not allowed to touch.** All three were real:
+
+- the pane-size threshold was a fraction of every pixel on the car that passed
+  the glass rule, so a car with blue-tinted chrome set itself a bar three times
+  higher than a car with neutral chrome. One agent built all four panes and was
+  told it had built two.
+- the taillamp piece-shape target was a plain mean over three components, one of
+  which is a hundred-pixel glint at aspect 8.60. A third of a 4.13 target that
+  no lamp on that car has. Area-weighted it is 2.11.
+- `inkmeter.mjs` found the car by rendering the frame twice and taking what
+  CHANGED — and a car pixel the colour of what is behind it does not change.
+  4,065 pixels, 37% of the car, all of it glass against a matching sky, missing
+  from the denominator of a fraction. `main.js` gains `tune.solo`: the car alone,
+  same camera, same pose, against a colour of the harness's choosing, twice,
+  union the masks.
+
+The repair exposed a fourth: the ink target 34-44% came from two reference files
+that no longer exist. It is measured at run time now, off the two that do, with
+the instrument's own threshold — 26.1% side, 36.3% rear. The old car reads 21.7%
+against that where it used to read 34.4% and ON TARGET.
+
+**`e` ships.** Both revisions put every landmark inside tolerance; `e` is closer
+on almost every row and better everywhere else.
+
+|                 | b       | d       | e       | the drawing |
+|-----------------|---------|---------|---------|-------------|
+| landmarks out   | 6       | 0       | 0       |             |
+| side IoU        | 95.6%   | 95.7%   | 96.5%   |             |
+| rear IoU        | 95.4%   | 95.5%   | 96.4%   |             |
+| panes of glass  | 3       | 4       | 4       | 4           |
+| rear screen     | 0.167   | 0.225   | 0.250   | 0.250       |
+| roof above it   | 0.033   | 0.100   | 0.117   | 0.116       |
+| lamp pieces     | 14      | 2       | 2       | 3           |
+| ink             | 21.7%   | 39.5%   | 33.6%   | 26-37%      |
+| triangles       | 9,464   | 9,796   | 9,436   |             |
+
+Three draw calls, both tracks' full check passing at 13 and 9 calls, and the one
+downloaded file back to 1,026 KB because `a`, `c` and the unused `f` slot were
+deleted rather than carried.
+
+**What is still wrong, measured and not hidden.** Both revisions put the rear
+quarter light at 25% of the greenhouse glass against the drawing's 17%, and the
+door glass at 53% against 63%, for the same reason: the drawing's C-pillar is a
+diagonal and this loft can only be cut by vertical stations, so the pane cannot
+taper to a point. Fixing it needs another point in the section table, which
+touches six other structures. Both agents found that independently and both
+stopped at the same wall, which is worth more than either of them saying so
+alone.
+
+**And one instrument is still weak.** `inkmeter.mjs` grades a crop: at the
+third-person pose the car is clipped by the bottom of the frame, so the flanks,
+wheels and tail panel are outside it, while the target band is measured on whole
+elevations. Changing only the sky-reflection band on the rear window moved one
+candidate 21.7% -> 39.3% -> 33.6% with no geometry touched at all. It can be on
+target for the wrong reason. Either frame the car fully in that pose or measure
+the band on a matching crop — not done, and flagged here rather than forgotten.
+
+**Third person is still off**, as asked, until Anthony has looked at the car.
+
 ## 4. Points and credits
 
 Earned by playing, in readiness for the garage. Bonuses for:

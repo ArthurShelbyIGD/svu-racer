@@ -31,7 +31,7 @@ import {
 } from 'three';
 
 import { inkGroup, buildOutline, inkMaterial, pencilTexture, INK } from './art/toon.js';
-import { buildBody } from './car/body.js';
+import { currentBody, bodyName } from './car/bodies.js';
 import { buildFurniture } from './world/furniture.js';
 import { buildBarrier } from './world/barrier.js';
 import { buildTunnel } from './world/tunnel.js';
@@ -168,6 +168,13 @@ const tune = { si: 3, maxSpeed: SPEED_STEPS[3], driverX: 0, pitch: 1,
                // override has to live here — setting camera.position from
                // outside lasts exactly one frame.
                studio: null,
+               // NULL TO RENDER THE WORLD; A COLOUR RENDERS THE CAR ALONE
+               // AGAINST IT, from the ordinary gameplay camera. For any
+               // instrument that needs to know which pixels are car and cannot
+               // trust "which pixels changed" — see the note at the render
+               // call. Two runs with two different colours and a union of the
+               // masks leaves a car pixel nowhere to hide.
+               solo: null,
                // null to drive normally; a number pins the lateral position
                holdX: null,
                // null to let the nitrous drain and refill normally; a number
@@ -2943,7 +2950,10 @@ const PENCIL = pencilTexture(128);
 // placeholder which still renders is indistinguishable from a bug, so the
 // moment the real thing draws a triangle the old one has to go in the same
 // commit.
-const bodyKit = buildBody({ pencil: PENCIL, palette: PAL, ink: INK });
+// WHICH CAR, from `?body=`. See src/car/bodies.js — rival candidates are
+// being scored against the reference drawings and the registry is how each one
+// gets photographed under identical conditions.
+const bodyKit = currentBody()({ pencil: PENCIL, palette: PAL, ink: INK });
 // THE TACHO'S FULL SCALE COMES FROM THE ENGINE, and it has to, because the two
 // have already drifted apart once. The dial face was drawn 0-8 thousand as a
 // literal back when the V8's limiter was 6,400 — loose, but only by a quarter.
@@ -2961,6 +2971,10 @@ const cockpit = buildCockpit({ pencil: PENCIL, palette: PAL, ink: INK, driverX: 
 
 /** Filled in and handed to the cockpit each frame; never reallocated. */
 let lastWantShift = null;
+/** Scratch for studio mode's clean-room render: [object, was-visible, ...]. A
+ *  flat array reused across frames, because this project does not allocate in
+ *  the loop even for a debug path. */
+const studioHidden = [];
 const COCKPIT_STATE = { speed: 0, maxSpeed: 0, steer: 0, boosting: false, braking: false,
                         boostLeft: 1, rev: 0, gear: 0, gears: GEARS.length, race: null };
 
@@ -4227,7 +4241,28 @@ function frame(now) {
     // broken instrument.
     bodyKit.group.visible = tune.showBody;
     cockpit.group.visible = false;
+    // EMPTY THE ROOM. The studio camera stands off to the side of the road at
+    // ground level, which on both tracks means it stands INSIDE something — a
+    // building on MIDNIGHT MILE, a container stack on THE DOCKS. Photographed
+    // dead side-on at fourteen units the frame is a wall, with the car nowhere
+    // in it.
+    //
+    // That is not only ugly, it was quietly bending the score. The silhouette
+    // harness isolates the car by diffing two renders of the same pose, so an
+    // occluder in front of it does not appear in the mask — it DELETES the part
+    // of the car behind it. Of the three camera distances that harness tries,
+    // two came back with nothing at all, so the pose search it does to keep a
+    // camera mismatch from masquerading as a shape difference was really
+    // choosing between one usable photograph and two blank ones.
+    //
+    // Restored immediately after the render, and driven by a flag, because a
+    // tool that photographs the game in situ is still a thing worth having.
+    if (tune.studio.clean) {
+      for (const o of scene.children) if (o !== car) { studioHidden.push(o, o.visible); o.visible = false; }
+    }
     renderer.render(scene, camera);
+    for (let i = 0; i < studioHidden.length; i += 2) studioHidden[i].visible = studioHidden[i + 1];
+    studioHidden.length = 0;
     return;
   }
 
@@ -4313,6 +4348,36 @@ function frame(now) {
   if (Math.abs(baseFov - wantFov) > 0.05) { baseFov = wantFov; applyFov(baseFov); }
 
   const tRender = performance.now();
+  // THE CAR ALONE, AGAINST A COLOUR OF THE HARNESS'S CHOOSING — same camera,
+  // same pose, same frame.
+  //
+  // tools/inkmeter.mjs isolates the car by rendering the frame twice and taking
+  // the pixels that CHANGED, and a car pixel that happens to match what is
+  // behind it does not change. That is not hypothetical: the current car's rear
+  // screen is (48,61,92) and the twilight sky it sits against is within a dozen
+  // of that, so about three thousand pixels of car were invisible to the
+  // instrument — it measured 6,930 pixels of car where the same car, isolated
+  // properly, is 11,029. Ink is a fraction with that number underneath it, so a
+  // car could improve its ink score by being the colour of the sky.
+  //
+  // Found by an agent revising the body, which is the argument for letting the
+  // things being measured report on the ruler.
+  //
+  // The camera is untouched, so this is still the gameplay framing the whole
+  // instrument is built around; only the scene behind the car goes away. Two
+  // different backgrounds and a union of the two masks leaves nothing to match.
+  if (tune.solo !== null && tune.solo !== undefined) {
+    for (const o of scene.children) if (o !== car) { studioHidden.push(o, o.visible); o.visible = false; }
+    const wasBg = scene.background;
+    scene.background = null;
+    renderer.setClearColor(tune.solo, 1);
+    renderer.render(scene, camera);
+    scene.background = wasBg;
+    for (let i = 0; i < studioHidden.length; i += 2) studioHidden[i].visible = studioHidden[i + 1];
+    studioHidden.length = 0;
+    PROF.render += performance.now() - tRender;
+    return;
+  }
   renderer.render(scene, camera);
   PROF.render += performance.now() - tRender;
   // THE TIMER NOW INCLUDES THE RENDER CALL, and it did not before.
@@ -4477,6 +4542,11 @@ const menu = buildMenu({
 window.RACER = {
   st, renderer, scene, camera, median, handling, tune, tilt, pedal, wake, fs, track,
   bodyKit, cockpit, scenery, furniture, gantry, PROF,
+  // WHICH BODY IS ACTUALLY IN THE SCENE. A harness that photographs `?body=b`
+  // and labels the picture "b" is trusting a query string it wrote itself; if
+  // the registry ever ignores it — a typo, a removed candidate, a changed
+  // default — the tool reports a comparison it did not make. Ask the game.
+  bodyName,
   // The barrier, so a harness can hide it and measure what it was covering.
   // Without a handle on the mesh, "is it on screen and how big is it" can only
   // be answered by eye, and by eye it was mistaken for the pavement railings.

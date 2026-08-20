@@ -38,6 +38,24 @@ await page.evaluate(() => {
   }
 });
 
+// START THE RACE FIRST. On the grid the loop zeroes the speed before it takes
+// the value the camera and the field of view read, so every "cruise" and
+// "boost" frame this tool has ever written was photographed at the parked
+// camera. Same hole as tools/inkmeter.mjs had; found by tools/chasecam.mjs.
+await page.evaluate(async () => {
+  const R = window.RACER;
+  R.startRace();
+  await new Promise((done, fail) => {
+    const t = R.st.simT + R.consts.COUNTDOWN + 0.05, g = performance.now() + 60000;
+    const step = () => {
+      if (R.st.simT >= t) return done();
+      if (performance.now() > g) return fail(new Error('the countdown never finished'));
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  });
+});
+
 const flat = await page.evaluate(() => {
   const t = window.RACER.track;
   let best = 0, bs = 1e9;
@@ -59,6 +77,7 @@ async function shot(name, opts) {
     R.st.dist = o.dist;
     R.st.x = 0;
     R.tune.maxSpeed = o.max;
+    R.tune.holdSpeed = o.speed;
     R.st.speed = o.speed;
     R.st.steer = o.steer || 0;
     R.st.slope = 0;
@@ -71,7 +90,7 @@ async function shot(name, opts) {
   // Freeze again — the loop may have advanced dist while we waited.
   await page.evaluate((o) => {
     const R = window.RACER;
-    R.st.dist = o.dist; R.st.speed = o.speed; R.st.x = 0;
+    R.st.dist = o.dist; R.tune.holdSpeed = o.speed; R.st.x = 0; R.tune.freeze = true;
   }, opts);
   await page.waitForTimeout(180);
   const i = await page.evaluate(() => ({

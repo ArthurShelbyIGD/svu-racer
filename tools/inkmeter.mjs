@@ -67,6 +67,30 @@ const r = await page.evaluate(async (view) => {
     if (s < bs) { bs = s; seg = i; }
   }
 
+  // AND IN THE RACING STATE, WHICH IS A THIRD THING THAT WAS WRONG.
+  //
+  // The frame loop zeroes the speed every frame while the car is on the grid —
+  // "on the line the throttle is dead, not fought" — and it does that BEFORE it
+  // takes `v = st.speed / maxSpeed`. So on a page that has never started a race
+  // v is 0 whatever a harness writes into st.speed, and v is what moves the
+  // chase camera back and up and opens the field of view. This file has
+  // therefore been measuring the car at its PARKED framing while its own
+  // comment claimed otherwise: bigger in frame, narrower lens, wrong number.
+  //
+  // Found by tools/chasecam.mjs, where standing still, cruising and flat out
+  // came back with the car in the same box to the digit — three speeds agreeing
+  // exactly is not a result, it is a symptom.
+  R.startRace();
+  await new Promise((done, fail) => {
+    const t = R.st.simT + R.consts.COUNTDOWN + 0.05, g = performance.now() + 60000;
+    const step = () => {
+      if (R.st.simT >= t) return done();
+      if (performance.now() > g) return fail(new Error('the countdown never finished'));
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  });
+
   // FROZEN AT A REALISTIC SPEED. Two earlier versions of this were wrong.
   // Leaving the car driving meant the road moved between the two captures, so
   // the diff was the whole frame rather than the car. Setting the speed to zero
@@ -75,7 +99,7 @@ const r = await page.evaluate(async (view) => {
   // holds distance still while leaving speed, and therefore framing, alone.
   const pose = () => {
     R.st.view = view; R.st.dist = seg * SEG; R.st.x = 0;
-    R.tune.maxSpeed = 210; R.st.speed = 170; R.tune.freeze = true;
+    R.tune.maxSpeed = 210; R.tune.holdSpeed = 170; R.tune.freeze = true;
     R.tilt.on = true; R.tilt.out = 0; R.st.steer = 0; R.st.slope = 0;
   };
 
@@ -149,6 +173,53 @@ const r = await page.evaluate(async (view) => {
   return { drawn, ink, missedByDiff, map, w, h, seg, span: x1 - x0, tall: y1 - y0 };
 }, VIEW);
 
+// ===========================================================================
+// AND THE SAME MEASUREMENT AT THE DRAWING'S OWN ANGLE, WHICH IS THE ONLY ONE
+// THAT CAN BE COMPARED TO IT.
+// ===========================================================================
+//
+// The band above comes from flat elevations — a car photographed dead astern
+// and dead side-on. The gameplay camera is neither: it looks down on the car
+// from behind, so the black tail panel, the dark glass and both rear tyres all
+// face it while the green flanks barely show. Grading that frame against an
+// elevation's number compares two different pictures of two different things,
+// and once the chase camera was fixed and the whole car came into frame it duly
+// read 52% against a 26-37% band with nothing wrong with the car.
+//
+// So the file measures BOTH. The gameplay figure is what the player sees and is
+// worth tracking; the studio figure stands the camera exactly where
+// ref/rear-nobg-crop.png stands and is the one that can be called right or
+// wrong. Same threshold, same car, same isolation.
+const studio = await page.evaluate(async () => {
+  const R = window.RACER;
+  const gl = R.renderer.getContext();
+  const w = R.renderer.domElement.width, h = R.renderer.domElement.height;
+  const f = () => new Promise((res) => requestAnimationFrame(() => res()));
+  const shoot = async (solo) => {
+    R.tune.studio = { az: 0, el: 0.10, dist: 14, clean: true };
+    R.tune.solo = solo;
+    await f(); await f();
+    const buf = new Uint8Array(w * h * 4);
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+    R.tune.solo = null;
+    return buf;
+  };
+  // The colour frame, then the two flat backdrops that say which pixels are car.
+  const A = await shoot(null);
+  const S1 = await shoot(0xff00ff), S2 = await shoot(0x003300);
+  R.tune.studio = null;
+  await f();
+  const near = (b, i, r, g, bl) => Math.abs(b[i] - r) + Math.abs(b[i + 1] - g)
+                                 + Math.abs(b[i + 2] - bl) < 12;
+  let car = 0, ink = 0;
+  for (let i = 0; i < A.length; i += 4) {
+    if (near(S1, i, 255, 0, 255) && near(S2, i, 0, 51, 0)) continue;
+    car++;
+    if (A[i] < 62 && A[i + 1] < 62 && A[i + 2] < 74) ink++;
+  }
+  return { car, ink, pct: 100 * ink / Math.max(1, car) };
+});
+
 const pct = 100 * r.ink / Math.max(1, r.drawn);
 console.log(`\nINK METER — ${VIEW === 3 ? 'third' : 'first'} person, ${r.w}x${r.h}, gameplay camera\n`);
 console.log(`  pixels the car occupies   ${r.drawn}`);
@@ -194,8 +265,20 @@ if (VIEW === 3) {
 console.log(`  INK                       ${pct.toFixed(1)}%      target ${TARGET[0]}-${TARGET[1]}%`);
 console.log(`  car spans                 ${r.span} x ${r.tall} px` +
             `   (${(100 * r.span / r.w).toFixed(0)}% of frame width)`);
-const verdict = pct < TARGET[0] ? 'TOO TIMID' : pct > TARGET[1] ? 'TOO HEAVY' : 'ON TARGET';
-console.log(`\n  ${verdict}`);
+// THE VERDICT IS ON THE STUDIO NUMBER, not the gameplay one. See the note above.
+if (VIEW === 3) {
+  console.log(`\n  dead astern, where the drawing stands:`);
+  console.log(`  the car occupies          ${studio.car}`);
+  console.log(`  of which black ink        ${studio.ink}`);
+  console.log(`  INK                       ${studio.pct.toFixed(1)}%      the rear drawing: ` +
+              `${REFS[1][1].toFixed(1)}%`);
+}
+const graded = VIEW === 3 ? studio.pct : pct;
+const verdict = graded < TARGET[0] ? 'TOO TIMID' : graded > TARGET[1] ? 'TOO HEAVY' : 'ON TARGET';
+console.log(`\n  ${verdict}` + (VIEW === 3
+  ? '   (on the dead-astern figure — the gameplay camera looks down on the car, so its'
+    + '\n        frame is mostly tail panel, glass and tyre and cannot be held to an elevation)'
+  : ''));
 
 // Green: both methods agree it is car. Red: only the solo mask sees it — car
 // the colour of what is behind it. Look at this before believing the number.

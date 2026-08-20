@@ -160,7 +160,16 @@ const tune = { si: 3, maxSpeed: SPEED_STEPS[3], driverX: 0, pitch: 1,
                showBody: true, showCockpit: true, freeze: false,
                // Chase camera, exposed so it can be SWEPT against the reference
                // rather than guessed at one rebuild per attempt.
-               camY: 5.2, camZ: 11.0, aimY: 2.2,
+               // THE CHASE CAMERA, SWEPT RATHER THAN NUDGED. See
+               // tools/chasecam.mjs: 5.2/11.0/2.2 was set while the car was a
+               // box and cut the whole tail off the bottom of the frame, which
+               // is not a matter of taste but a bounding box against an edge.
+               // A 48-point grid over height, distance and aim, measured with
+               // the car rendered alone so its box is exact, and this is the
+               // corner of it that keeps the car whole with a margin at every
+               // speed, puts a fifth of the frame's width across it, and still
+               // leaves the horizon a third of the way down.
+               camY: 3.4, camZ: 10.5, aimY: -3.0,
                // STUDIO MODE. When set to {az, el, dist} the chase camera is
                // replaced by one orbiting the car, so a harness can photograph
                // it from the same angle as a reference drawing and compare the
@@ -2975,6 +2984,9 @@ let lastWantShift = null;
  *  flat array reused across frames, because this project does not allocate in
  *  the loop even for a debug path. */
 const studioHidden = [];
+/** How far the chase camera's aim may be lifted by the road ahead. See the
+ *  note at the lookAt. */
+const CHASE_RISE_CAP = 2.6;
 const COCKPIT_STATE = { speed: 0, maxSpeed: 0, steer: 0, boosting: false, braking: false,
                         boostLeft: 1, rev: 0, gear: 0, gears: GEARS.length, race: null };
 
@@ -2995,7 +3007,11 @@ const st = {
   x: 0,           // lateral position, road units
   steer: 0,       // -1..1, smoothed
   slope: 0,       // smoothed gradient under the car, for camera pitch
-  view: 1,        // FIRST PERSON ONLY for now — see the note on bView below
+  // 1 is the driver's seat, 3 is the chase camera. THE PLAYER CHOOSES NOW —
+  // the row in Settings is CHASE CAMERA and it survives a reload, because the
+  // most common thing a tester does is reload and being put back in a view
+  // they did not pick is how a setting gets reported as broken. See VIEW_KEY.
+  view: 1,
   gear: 0,        // index into GEARS; the player always starts in first
   rev: 0,         // 0..1 against the current gear's ceiling, drives the tacho
   // Simulated seconds elapsed: the sum of the CLAMPED dt the physics actually
@@ -4260,7 +4276,19 @@ function frame(now) {
     if (tune.studio.clean) {
       for (const o of scene.children) if (o !== car) { studioHidden.push(o, o.visible); o.visible = false; }
     }
+    // AND `solo` WORKS IN HERE TOO, which it did not. The studio branch returns
+    // before the solo block at the bottom of this function, so a harness that
+    // set both got the studio camera with the ordinary sky behind it — and its
+    // "which pixels are not the backdrop" test then answered "all of them" and
+    // reported the entire frame as car. Silent, and the sort of wrong that
+    // looks like a number.
+    const wasBg = scene.background;
+    if (tune.solo !== null && tune.solo !== undefined) {
+      scene.background = null;
+      renderer.setClearColor(tune.solo, 1);
+    }
     renderer.render(scene, camera);
+    scene.background = wasBg;
     for (let i = 0; i < studioHidden.length; i += 2) studioHidden[i].visible = studioHidden[i + 1];
     studioHidden.length = 0;
     return;
@@ -4331,8 +4359,26 @@ function frame(now) {
     // missing from ours. Raising the eye and aiming BELOW it pitches the camera
     // down, which pushes the horizon up the frame and opens out the tarmac in
     // between. Roughly four degrees of pitch buys the thirteen percent.
-    camera.position.set(-st.steer * 1.1, tune.camY + v * 0.5 - st.slope * 3, tune.camZ + v * 1.6);
-    camera.lookAt(st.steer * 3.0, tune.aimY + aimY(8) * 0.7, -46);
+    camera.position.set(-st.steer * 1.1, tune.camY + v * 0.5 - st.slope * 1.5, tune.camZ + v * 1.6);
+    // THE AIM FOLLOWS THE HILL, BUT ONLY SO FAR.
+    //
+    // Aiming at the road ahead is what makes a crest feel like a crest — see
+    // the note above. Unclamped it also makes the steepest climb on the lap
+    // throw the car off the bottom of the screen: at the bridge ramp the
+    // smoothed gradient reaches 0.232, the road eight segments ahead is eleven
+    // units higher, and at the old 0.7 that lifted the aim by nearly eight
+    // units. The camera pitches up, and everything in the frame — the car
+    // included — slides down. Measured by tools/chasecam.mjs driving ONTO the
+    // ramp rather than asserting a gradient: the car's box ran to the bottom
+    // edge and past it.
+    //
+    // A cap rather than a smaller factor, because the factor is right for the
+    // hills the player meets constantly and wrong only for the one ramp that
+    // is steeper than anything else on either track. RISE_CAP is in world
+    // units of aim, and 2.6 is what leaves the car clear at 0.232 with room
+    // to spare.
+    camera.lookAt(st.steer * 3.0,
+      tune.aimY + Math.min(aimY(8) * 0.45, CHASE_RISE_CAP), -46);
   } else {
     // First person: the bodywork goes, the cockpit stays.
     bodyKit.group.visible = false;
@@ -4478,6 +4524,23 @@ requestAnimationFrame(frame);
  * developer's panel on a player's screen; they are settings now, and nothing
  * about what they DO has changed.
  */
+/**
+ * WHICH VIEW, ACROSS RELOADS.
+ *
+ * Third person was shelved in August after a matched-viewpoint comparison —
+ * Anthony: "it really doesn't resemble the subject image at all... The way it
+ * is now it's not worth keeping" — and the button that selected it was removed
+ * rather than left offering something below standard. Two rounds of rival car
+ * bodies later the exterior matches the drawing on twenty measured landmarks,
+ * he has driven it and said "I think we have a usable car now", and the button
+ * comes back.
+ *
+ * Default is still the driver's seat: it is the view the game was tuned in and
+ * the one every lap time on record was set from.
+ */
+const VIEW_KEY = 'svu-racer-view';
+try { if (localStorage.getItem(VIEW_KEY) === '3') st.view = 3; } catch (e) { /* then first person */ }
+
 const menu = buildMenu({
   race: () => { firstGesture(); if (race.state !== 'countdown') startRace(); },
   read: () => ({
@@ -4486,6 +4549,7 @@ const menu = buildMenu({
     tilt: tilt.enabled,
     invert: tilt.invert,
     readout: !document.body.classList.contains('lean'),
+    chase: st.view === 3,
     // Shown as what they mean, not as an array index. "1.50x" and "30 fps" are
     // answerable by a tester; "4" and "2" are not.
     pixels: DPR_STEPS[dprI].toFixed(2) + 'x',
@@ -4518,6 +4582,10 @@ const menu = buildMenu({
     }
     else if (k === 'invert') { tilt.invert = !tilt.invert; recentreTilt(); }
     else if (k === 'readout') { document.body.classList.toggle('lean'); worst = 0; }
+    else if (k === 'chase') {
+      st.view = st.view === 3 ? 1 : 3;
+      try { localStorage.setItem(VIEW_KEY, String(st.view)); } catch (e) { /* one-off */ }
+    }
   },
   act: (k) => {
     if (k !== 'fullscreen') return;

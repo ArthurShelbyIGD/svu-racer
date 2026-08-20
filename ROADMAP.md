@@ -783,6 +783,159 @@ the band on a matching crop — not done, and flagged here rather than forgotten
 
 **Third person is still off**, as asked, until Anthony has looked at the car.
 
+### 20 August, later still: a bounding box cannot see a shape
+
+Anthony, on the car that had just put every landmark inside tolerance: *"The
+rear of the car has a couple of issues. The main one is the rear screen is the
+wrong shape completely, it looks like an upside down T shape... The rear lights
+still look a bit strange and I feel the rectangular shape between them, probably
+a logo on the original art, should be removed completely and we put a license
+plate between the rear lights."*
+
+**He was right, and the harness had signed the screen off at three decimal
+places.** Height 0.250 against the drawing's 0.250. Width 0.641 against 0.642.
+Bodywork above it 0.117 against 0.116. Every one of those is a property of a
+BOUNDING BOX, and an upside-down T fits the same box as a trapezoid. Same class
+of blindness as the silhouette two rounds ago, one level down: last time the
+instrument could not see inside the outline, this time it could not see inside
+the outline of the thing inside the outline.
+
+**Why the car was that shape is worth writing down, because it was designed in.**
+The glass could only stop at a rail, and there were two: rail 8, the stripe
+edge, at a fixed x, and rail 7, the roof rail, which sweeps outboard as the roof
+falls to the deck. Stop at 8 and the window is 0.55 of the car wide top to
+bottom; stop at 7 and it is 0.81. The drawing wants 0.52 rising to 0.64. So the
+previous version stopped at 8 for the steep two thirds and at 7 for the flat
+bottom third — hitting both numbers it was aiming at and producing a stem on a
+foot.
+
+The fix stops being limited to rails: span 7 is cut in two at a fraction of its
+own width, sail panel outboard and glass inboard, and the fraction RAMPS from
+0.30 at the top of the backlight to 1.00 at the base. The ramp is not decoration.
+A flat 0.75 matches the drawing to a hundredth on every rear measure and puts a
+FIFTH pane of glass in the side view, because near the top of the backlight the
+roof is still steep and a dead-side-on camera can see over the shoulder onto
+glass that should be sail. Narrow where the flank is exposed, wide where only
+the rear camera can see it — which is also the shape of a real C-pillar.
+
+**The new landmark, and the trap inside it.** `tools/landmarks.mjs` now measures
+the screen's width at five stations down its own height. Not with the glass rule
+— the drawing's backlight is nearly black with a pale strip at the top, so a rule
+tuned to pale blue finds a fragment of it and a rule loose enough for the black
+runs down the pillars and joins the screen to the whole car. What works on both
+pictures is the negative: at each row, the longest unbroken run of car that is
+neither green paint nor purple stripe.
+
+LONGEST UNBROKEN RUN, and the first version summed the row instead. That counts
+the car's own outline ink, which sits at both ends of every row — so the window
+read five to ten points wider than it is, by an amount that depends on how thick
+each picture draws its outline. Ours is heavier than the drawing's, so the bias
+was not even equal on the two sides of the comparison. Caught because the glass
+component and the row profile disagreed by 0.13 and one of them had to be wrong.
+
+|                          | drawing | before | after |
+|--------------------------|---------|--------|-------|
+| screen width at its top  | 0.552   | 0.545  | 0.526 |
+| screen width at its base | 0.642   | 0.808  | 0.641 |
+| flare, top to bottom     | 0.091   | 0.244  | 0.115 |
+
+**The tail panel.** Badge out, plate up between the lamps — the drawing does put
+the plate on the bumper and the thing on the panel is the RS badge, and Anthony
+is right that it does not matter: a plate there is real (a '69 does it), it is
+far more legible at the size the chase camera draws the car, and it fills a
+panel that otherwise carries a chrome smudge. Sized 4.5:1 for a British plate.
+And two lenses a side instead of one wide one, which is what the drawing has —
+count them.
+
+That last change came with a prediction that turned out wrong and is recorded in
+the file as such: splitting the lens was expected to take "pieces the red breaks
+into" from 2 to 4 and be worth the fault. It stays at 2, because the lamp's halo
+crosses the divider and the halo passes the same red rule — which is exactly why
+the drawing's own pairs merge too.
+
+All 20 landmarks inside tolerance, silhouette unchanged at 96.5 side and 96.4
+rear, ink 34.9% inside the measured 26-37 band, and the car is 9,304 triangles —
+132 CHEAPER than before, because the badge and one divider cost more than the
+extra lens.
+
+### 20 August, evening: SVU 1, the view button, and the camera it came back to
+
+Anthony: *"I think we have a usable car now. If we can add SVU 1 to the number
+plate then I feel we can add a 1st/3rd person view button in settings. Then we
+just have to tune the 3rd person viewing angle and I can drop a link over the
+weekend."*
+
+**SVU 1 is geometry, and it had to be.** Text on the plate cannot go through
+`endFace` — every feature on an end face is given for the right half and
+mirrored, which is right for lamps and guards and turns "SVU 1" into "1 UVS".
+It cannot be a texture either: the car is three draw calls and its one map is
+the pencil hatch, which tiles across every panel, so carving letters into a
+corner of that sheet would write SVU wherever the hatch landed. So each
+character is a three-by-five grid with its horizontal runs merged, 27 quads and
+54 triangles for the whole plate, standing 9mm proud the way a real plate's
+characters are pressed out of the metal.
+
+**CHASE CAMERA is back in Settings**, worded as what you get rather than as a
+number, and it survives a reload — a setting that only sticks one way is worse
+than one that never sticks. `tools/viewswitch.mjs` asserts the CONSEQUENCE and
+not the flag: the row exists, a fresh load is in the driver's seat, tapping it
+moves 93% of the pixels against a negative control of 0.07% for doing nothing,
+and both states survive a reload. That harness exists because this project has
+already shipped a Settings switch that set a flag and did nothing else.
+
+**And then the camera it was coming back to.** It was last set when the car was
+a box and it cut the whole tail off the bottom of the frame. Not a matter of
+taste — a bounding box against a frame edge, which is the first thing
+`tools/chasecam.mjs` now checks.
+
+Two instrument findings came out of tuning it, and the second is the bigger one.
+
+**The horizon sign was backwards.** Tilting a camera down moves everything in
+the frame UP, the horizon included, so more pitch is a SMALLER fraction and more
+tarmac underneath. The plus sign said 58% where the photograph plainly showed
+43%.
+
+**AND THE GAME WAS ON THE GRID.** The frame loop zeroes the speed every frame
+while the car is held on the line — "on the line the throttle is dead, not
+fought" — and it does that BEFORE it takes `v = st.speed / maxSpeed`. So on a
+page that has never started a race, v is 0 whatever a harness writes into
+st.speed, and v is what moves the chase camera back and up and opens the field
+of view. Every "cruise" and "boost" frame `tools/carshots.mjs` has ever written
+was photographed at the PARKED camera, and `tools/inkmeter.mjs` has been grading
+the car at a framing the player never sees while its own comment claimed
+otherwise. Caught because standing still, 170 and flat out came back with the
+car in the same box to the digit — three speeds agreeing exactly is not a
+result, it is a symptom. All three tools start the race now.
+
+The sweep is 48 settings over height, distance and aim, with the car rendered
+alone so its box is exact. What ships sits in the middle of the valid region:
+
+  camY 3.4  camZ 10.5  aimY -3.0     car 21% of the frame's width,
+                                     49-88% down it, horizon 35% down
+
+  one notch closer  the car clips the bottom
+  one notch higher  the car touches the bottom
+  one notch back    the car is too small
+  the old setting   the tail is off the screen entirely
+
+The gradient cases are DRIVEN INTO rather than asserted: writing a segment's raw
+gradient into st.slope measures a slope the smoothing may never reach, and the
+first version duly reported the car clipped at a place that photographs
+perfectly well. Driven properly, the one place the car's exhaust tips clip is
+the bridge ramp, the steepest thing in the game, for the second you are on it.
+The aim's hill-following is capped at 2.6 units to keep that from being worse.
+
+**One thing found and NOT fixed, with a number on it.** Dead astern, at the
+angle ref/rear-nobg-crop.png is drawn from, our car is 57% ink against the
+drawing's 36%. That is a real gap and it is a look, not a fault — noted here
+rather than rushed the day before the link goes out. inkmeter now measures both
+the gameplay frame and the studio frame, and grades on the studio one, because
+the chase camera looks down on the car and its frame is mostly tail panel, glass
+and tyre — an elevation's band cannot judge it.
+
+Everything else holds: 20 of 20 landmarks, silhouette 96.5 side and 96.4 rear,
+9,360 triangles, three draw calls, both tracks passing at 13 and 9.
+
 ## 4. Points and credits
 
 Earned by playing, in readiness for the garage. Bonuses for:

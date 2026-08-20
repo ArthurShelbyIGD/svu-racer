@@ -306,6 +306,12 @@ export function buildMenu(api) {
     { k: 'fullscreen', kind: 'act', label: 'FULLSCREEN', act: 'GO',
       note: 'Fills the screen and locks landscape. Some in-app browsers refuse it — ' +
             'if yours does, open the link in Chrome or Safari instead.' },
+    // BACK AFTER BEING PULLED. See VIEW_KEY in main.js for why it went and why
+    // it is here again. Worded as what you get rather than as a number, because
+    // "1st/3rd person" is jargon from inside the code: a player knows whether
+    // they want to be in the car or behind it.
+    { k: 'chase', kind: 'sw', label: 'CHASE CAMERA',
+      note: 'Drive from behind the car instead of from the driver\'s seat.' },
     { k: 'readout', kind: 'sw', label: 'SHOW THE NUMBERS',
       note: 'Frame rate, draw calls and triangles, over the track. For sending back test data.' },
     // ---- LAST, AND IT BELONGS LAST -------------------------------------

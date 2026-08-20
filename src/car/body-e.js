@@ -733,6 +733,41 @@ const ALONG = new Set([2, 4, 6, 7, 8, 9]);
  *  and the stripes never reach them. */
 const GLASS_ZONE = new Set(['screen', 'postA', 'vent', 'postB', 'blightU', 'blight']);
 
+/** The stations the rear window spans. Their outermost top-surface span is cut
+ *  in two — sail panel outside, glass inside — instead of being all one or all
+ *  the other. See the long note in loft(). */
+const BACKLIT = new Set(['blightU', 'blight']);
+
+/**
+ * HOW MUCH OF THAT SPAN IS GLASS, measured inboard from the roof rail. 0 puts
+ * the window's edge on the stripe edge, 1 puts it on the rail itself.
+ *
+ * IT RAMPS DOWN THE WINDOW, and the ramp is not decoration — it is the only
+ * shape that satisfies both cameras at once. A flat 0.75 gives a rear window
+ * that matches the drawing to a hundredth on every measure: width 0.615 against
+ * 0.642, top 0.526 against 0.552, flare 0.090 against 0.091. It also puts a
+ * FIFTH pane of glass in the side view, 4% of the greenhouse at u0.78, because
+ * near the top of the backlight the roof is still steep and the dome's crest
+ * has not moved outboard yet, so a dead-side-on camera can see over the
+ * shoulder onto glass that should be sail panel.
+ *
+ * That is the same conflict the two-zone version was built to dodge, and
+ * dodging it with a step is what produced the upside-down T. A ramp resolves it
+ * instead: narrow where the roof is steep and the flank is exposed, wide where
+ * it has gone flat and only the rear camera can see it. Which is also, not
+ * coincidentally, the shape of a real C-pillar.
+ */
+const BLIGHT_GLASS_TOP = 0.30, BLIGHT_GLASS_BOT = 1.00;
+/** The u range the ramp runs over — the backlight's own stations. */
+const BLIGHT_U0 = 0.766, BLIGHT_U1 = 0.900;
+const blightGlass = (u) => {
+  const t = Math.max(0, Math.min(1, (u - BLIGHT_U0) / (BLIGHT_U1 - BLIGHT_U0)));
+  return BLIGHT_GLASS_TOP + (BLIGHT_GLASS_BOT - BLIGHT_GLASS_TOP) * t;
+};
+
+/** Whether the cut carries the window's bright surround. */
+const BLIGHT_SURROUND = false;
+
 /** The zones whose SIDE — rail 6 to rail 7 — is a pane of glass. Four panes and
  *  three posts, read straight off ref/side-nobg.png; see ZONE above. */
 const SIDE_GLASS = new Set(['screen', 'vent', 'cabin', 'quarter']);
@@ -1304,12 +1339,68 @@ function loft(B, C, deco) {
         if (c.ink === 'trim') return at(C.chrome, 4);
         return other === undefined ? LINE : crease(zone, other);
       };
-      B.cell(A, Bp, Cp, D, spec, {
+      const edges = {
         u0: along(ka),
         u1: along(kb),
         v0: across(cn, ZONE[g - 1]),
         v1: across(cf, ZONE[g + 1]),
-      }, want);
+      };
+
+      // =====================================================================
+      // THE C-PILLAR IS PART OF A SPAN, NOT A WHOLE ONE — AND THAT IS WHY THE
+      // REAR WINDOW WAS AN UPSIDE-DOWN T.
+      // =====================================================================
+      //
+      // Anthony: "the rear screen is the wrong shape completely, it looks like
+      // an upside down T shape". He is right, and it was designed in. The glass
+      // could only stop at a rail, and there are only two candidates: rail 8,
+      // the stripe edge at a FIXED x, or rail 7, the roof rail, which sweeps
+      // outboard as the roof falls to the deck. Stopping at 8 gives a window
+      // 0.55 of the car wide from top to bottom; stopping at 7 gives 0.81. The
+      // drawing wants 0.57 at the top and 0.68 at the base. So the previous
+      // version stopped at 8 for the steep two thirds and at 7 for the flat
+      // bottom third — and got both numbers it was aiming at, height and width,
+      // because both are properties of a BOUNDING BOX, while the shape inside
+      // that box came out as a stem on a foot.
+      //
+      // The fix is to stop being limited to rails. Span 7 is cut in two at a
+      // fraction of its own width, painted sail panel outboard and glazed
+      // inboard, with the window's bright surround drawn on the cut. The cut
+      // tracks the roof rail, so the pillar widens exactly as the roof does and
+      // the glass opens out with it: a taper, and a taper is what a rear window
+      // is.
+      //
+      // K IS THE ONE NUMBER AND IT IS MEASURED, not chosen. At K=0 the glass
+      // stops at the stripe edge and tools/landmarks.mjs reads the window 0.55
+      // wide; at K=1 it reaches the rail and reads 0.81. The drawing reads
+      // 0.569 at the top of the glass and 0.677 at the bottom.
+      if (BACKLIT.has(zone) && kind === 7) {
+        const railFirst = ka === 7;                    // is A/D the roof-rail end?
+        const xRail = Math.abs((railFirst ? A : Bp)[0]);
+        const xStripe = Math.abs((railFirst ? Bp : A)[0]);
+        const gap = xRail - xStripe;
+        // Fraction along the span, measured from A, at which the paint stops.
+        const fromRail = gap > 1e-6 ? (1 - blightGlass(zu(zMid))) : 0;
+        const f = railFirst ? fromRail : 1 - fromRail;
+        const lerp = (P, Q) => [P[0] + (Q[0] - P[0]) * f, P[1] + (Q[1] - P[1]) * f,
+          P[2] + (Q[2] - P[2]) * f];
+        const M0 = lerp(A, Bp), M1 = lerp(D, Cp);
+        const paint = skinOf('sail', kind, C, arch, false);
+        const pane = skinOf('blight', kind, C, arch, skyward);
+        const surround = BLIGHT_SURROUND ? at(C.chrome, 4) : null;
+        // Outboard half, then inboard half. The surround is drawn on the shared
+        // border once, by whichever half has it as its u1/u0.
+        if (railFirst) {
+          B.cell(A, M0, M1, D, paint, { ...edges, u1: surround }, want);
+          B.cell(M0, Bp, Cp, M1, pane, { ...edges, u0: null }, want);
+        } else {
+          B.cell(A, M0, M1, D, pane, { ...edges, u1: null }, want);
+          B.cell(M0, Bp, Cp, M1, paint, { ...edges, u0: surround }, want);
+        }
+        continue;
+      }
+
+      B.cell(A, Bp, Cp, D, spec, edges, want);
     }
   }
   return rings;
@@ -1476,6 +1567,83 @@ function endFace(B, sec, z, dir, base, feats, band = [], glow = false) {
   }
 }
 
+// --------------------------------------------------------------- the plate
+//
+// SVU 1, ON THE NUMBER PLATE. Anthony asked for it, and it is the only text
+// anywhere on the car.
+//
+// IT CANNOT GO THROUGH endFace, and that is why it is its own function. Every
+// feature on an end face is given for the RIGHT HALF and mirrored — one loop,
+// `for (const sgn of [1, -1])` — which is exactly right for lamps, guards and
+// exhaust cut-outs and useless for a word. "SVU 1" mirrored is "1 UVS".
+//
+// AND IT CANNOT BE A TEXTURE. The car is three draw calls and the one map it
+// has is the shared pencil hatch, which tiles across every panel; carving a
+// corner of that 128px sheet into letters would put the word "SVU" wherever the
+// hatch happened to land, which is everywhere. A second texture is a second
+// material is a fourth draw call, on a Helio A22, for five characters.
+//
+// So the letters are GEOMETRY, which is what everything else on this car is: a
+// three-by-five grid per character, horizontal runs merged into one quad each,
+// which comes to 27 quads and 54 triangles for the whole plate.
+//
+// THEY STAND PROUD, and that is not a z-fighting dodge — a real plate's
+// characters are pressed out of the metal. 0.02 is nine millimetres at this
+// car's scale, well inside the ink hull's own 0.09 offset, so the shell still
+// draws the plate's outline and never swallows the letters.
+const GLYPH = {
+  S: ['111', '100', '111', '001', '111'],
+  V: ['101', '101', '101', '010', '010'],
+  U: ['101', '101', '101', '101', '111'],
+  1: ['010', '110', '010', '010', '111'],
+  ' ': ['000', '000', '000', '000', '000'],
+};
+const PLATE_TEXT = 'SVU 1';
+
+/** The plate, in the same units tailFeatures uses: x0, x1 as xy(), y0, y1 as
+ *  vy(). One definition, so the lettering and the plate cannot drift apart. */
+const PLATE_BOX = [0.00, 0.35, 0.418, 0.527];
+
+/**
+ * The registration, as raised blocks on the face of the plate.
+ *
+ * @param {Builder} B
+ * @param {object}  C     the palette
+ * @param {Array}   box   [x0, x1, y0, y1] of the plate itself, in world units,
+ *                        x0 being 0 at the centreline
+ * @param {number}  z     the tail face
+ */
+function plateText(B, C, box, z) {
+  const [, xHalf, y0, y1] = box;
+  // Inside the plate's own painted border, with a margin the same both ways.
+  const mx = xHalf * 0.14, my = (y1 - y0) * 0.16;
+  const left = -(xHalf - mx), right = xHalf - mx;
+  const top = y1 - my, bot = y0 + my;
+  const cols = PLATE_TEXT.length * 4 - 1;      // three wide, one of gap between
+  const cw = (right - left) / cols;
+  const ch = (top - bot) / 5;
+  const zz2 = z + xy(0.02);
+  const want = [0, 0, 1];
+  for (let g = 0; g < PLATE_TEXT.length; g++) {
+    const rows = GLYPH[PLATE_TEXT[g]];
+    if (!rows) continue;
+    for (let r = 0; r < 5; r++) {
+      const row = rows[r];
+      let c = 0;
+      while (c < 3) {
+        if (row[c] !== '1') { c++; continue; }
+        let e = c;
+        while (e + 1 < 3 && row[e + 1] === '1') e++;
+        const xa = left + (g * 4 + c) * cw, xb = left + (g * 4 + e + 1) * cw;
+        const ya = top - (r + 1) * ch, yb = top - r * ch;
+        B.quad([xa, ya, zz2], [xb, ya, zz2], [xb, yb, zz2], [xa, yb, zz2],
+          at(C.trim, 0), want);
+        c = e + 1;
+      }
+    }
+  }
+}
+
 /** The closing cap for the ink hull: one band per ring span, left to right. */
 function endCap(B, sec, z, dir, spec) {
   const want = [0, 0, dir];
@@ -1577,7 +1745,7 @@ function tailFeatures(C) {
   // body is band 2 and only the segment gaps are dark.
   const lens = (x0, x1) => f.push({
     x0: xy(x0), x1: xy(x1), y0: LAMP_BOX.y0, y1: LAMP_BOX.y1,
-    spec: at(C.lamp, 2), ink: at(C.lamp, 1), segs: 6, source: true,
+    spec: at(C.lamp, 2), ink: at(C.lamp, 1), segs: 3, source: true,
     rib: at(C.lamp, 0),
   });
   const box = (x0, x1, y0, y1, spec, ink) => f.push({
@@ -1597,12 +1765,40 @@ function tailFeatures(C) {
   // the car's height where it was 0.155, which is what takes a piece from 0.84
   // to the drawing's landscape proportion, and it sits lower on the panel so
   // the deck above it is the drawing's 0.17 of the car and not 0.21.
-  lens(0.48, 1.06);
-  // The badge in the middle of the black panel.
-  box(0.00, 0.12, 0.500, 0.575, at(C.chrome, 1), at(C.chrome, 3));
-  // Below the bumper: the plate, two bumper guards, two reflectors and the
-  // exhaust cut-outs the pipes come out of.
-  box(0.00, 0.24, 0.268, 0.318, at(C.plate, 3));
+  // TWO LENSES A SIDE, WHICH IS WHAT THE DRAWING HAS. Anthony, on the single
+  // wide one: "the rear lights still look a bit strange". Count them in
+  // ref/rear-nobg-crop.png and there are four: two per side, a narrow body-
+  // coloured divider between each pair, three fine ribs in each lens. One lens
+  // 0.58 wide with six ribs in it reads as a grille, which is the strangeness.
+  //
+  // AND IT COSTS NOTHING, WHICH WAS NOT THE PREDICTION. This comment first said
+  // the split would take "pieces the red breaks into" from 2 to 4, and argued
+  // the extra fault was worth paying because four lenses are what the artist
+  // drew. Measured, it stays at 2 — the lamp's own halo crosses the divider and
+  // the halo is red enough to pass the same rule, so each pair merges into one
+  // component exactly as the drawing's pair does. The wrong guess is recorded
+  // rather than deleted: the job of a comment here is to say what the number
+  // DID, and a prediction that survived into the file unchecked would be the
+  // same mistake this project keeps finding in its own instruments.
+  lens(0.48, 0.745);
+  lens(0.795, 1.06);
+  // THE PLATE MOVED UP BETWEEN THE LAMPS, and the badge is gone.
+  //
+  // Anthony: "the rectangular shape between them, probably a logo on the
+  // original art, should be removed completely and we put a license plate
+  // between the rear lights. I think that plate is on the rear bumper in the
+  // original but I don't see a problem with it being between the rear lights."
+  //
+  // He is right about the original — the drawing's plate is on the bumper and
+  // the thing on the panel is the RS badge — and right that it does not matter.
+  // A plate on the black panel is a real place for one (it is where a '69 puts
+  // it), it is far more legible at the size the chase camera draws the car, and
+  // it fills a panel that otherwise has a small chrome smudge in the middle of
+  // it. Sized to a British plate: 0.75 of a world unit wide by 0.167 tall is
+  // 4.5:1, which is the 520x110mm proportion.
+  box(PLATE_BOX[0], PLATE_BOX[1], PLATE_BOX[2], PLATE_BOX[3], at(C.plate, 3));
+  // Below the bumper: two bumper guards, two reflectors and the exhaust
+  // cut-outs the pipes come out of.
   box(0.37, 0.46, 0.258, 0.398, at(C.chrome, 2));
   box(0.70, 0.96, 0.284, 0.315, at(C.chrome, 1));
   box(0.72, 1.10, 0.256, 0.310, at(C.trim, 0), at(C.trim, 0));
@@ -1907,6 +2103,7 @@ function bodywork(B, C, deco) {
   if (deco) {
     endFace(B, nose, NOSE_Z, -1, noseBase(C), noseFeatures(C), NOSE_BANDS);
     endFace(B, tail, TAIL_Z, 1, tailBase(C), tailFeatures(C), TAIL_BANDS, true);
+    plateText(B, C, [xy(PLATE_BOX[0]), xy(PLATE_BOX[1]), vy(PLATE_BOX[2]), vy(PLATE_BOX[3])], TAIL_Z);
   } else {
     endCap(B, nose, NOSE_Z, -1, at(C.green, 1));
     endCap(B, tail, TAIL_Z, 1, at(C.green, 1));

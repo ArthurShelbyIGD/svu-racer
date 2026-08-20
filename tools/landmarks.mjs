@@ -327,6 +327,75 @@ function rearLandmarks(src) {
     .sort((a, b) => b.n - a.n);
   const screen = gl[0] || null;
 
+  // ===========================================================================
+  // AND ITS SHAPE, BECAUSE A BOUNDING BOX CANNOT SEE ONE.
+  // ===========================================================================
+  //
+  // The screen passed every row above at its second attempt — height 0.250
+  // against the drawing's 0.250, width 0.641 against 0.642, roof above it 0.117
+  // against 0.116 — and Anthony looked at it and said: "the rear screen is the
+  // wrong shape completely, it looks like an upside down T shape". He is right,
+  // and every number in this file was blind to it, because height and width are
+  // properties of a BOX and the fault is what happens between the top of the box
+  // and the bottom of it.
+  //
+  // Measured, the fault is emphatic: our screen is 0.38 of the car's width at
+  // the top and 0.83 at the bottom. The drawing's goes 0.57 to 0.68. A gentle
+  // taper against a funnel, and both fit a box of the same size.
+  //
+  // HOW THE WIDTH IS TAKEN, and why not with the glass rule. The drawing's
+  // backlight is nearly black in the middle with a pale reflection across the
+  // top, so a glass rule tuned to pale blue finds a fragment of it; a rule loose
+  // enough to catch the black catches every ink line on the car too, and a
+  // connected-component search then runs down the pillars and joins the screen
+  // to the whole outline. Both were tried. What works on both pictures is the
+  // NEGATIVE: at each row, how much of the car is neither green paint nor purple
+  // stripe. Across the roof that is nearly nothing; across the backlight it is
+  // the backlight. It needs no threshold on darkness and no components at all.
+  // THE LONGEST UNBROKEN RUN, NOT THE TOTAL. A row's total of non-paint pixels
+  // also counts the car's own outline, which is ink and sits at both ends of
+  // every row — so the window came out five to ten points wider than it is, by
+  // an amount that depends on how thick each picture draws its outline. Ours is
+  // heavier than the drawing's, so the bias was not even the same on both
+  // sides of the comparison. The window is one continuous hole across the car;
+  // measure the hole.
+  const rowGap = new Float64Array(box.H);
+  for (let i = 0; i < box.H; i++) {
+    const y = box.y0 + i;
+    let run = 0, best = 0;
+    for (let x = box.x0; x <= box.x1; x++) {
+      const p = y * w + x;
+      const r = rgb[p * 3], g = rgb[p * 3 + 1], b = rgb[p * 3 + 2];
+      const green = g > r + 18 && g > b + 18;
+      const purple = r > g + 8 && b > g + 8 && (Math.max(r, g, b) - Math.min(r, g, b)) > 18;
+      if (m[p] && !green && !purple) { if (++run > best) best = run; } else run = 0;
+    }
+    rowGap[i] = best / box.W;
+  }
+  // WHERE THE BAND STARTS AND STOPS, without a fixed threshold.
+  //
+  // A fixed one was tried first and it overran: below the backlight our deck
+  // carries enough ink to hold the gap at 0.29, so a cut at 0.25 swallowed the
+  // deck, sampled the bottom of the "screen" down there and reported the screen
+  // NARROWING by 0.25 when it is in fact widening by 0.27. Exactly the kind of
+  // instrument that agrees with nothing anybody can see.
+  //
+  // So the cut is relative to the band's own peak — 45% of it — and the band is
+  // the run of rows CONTAINING that peak, not the first run to cross a line.
+  // The search stops at 40% of the car's height, which is below every backlight
+  // and above every tail panel on both pictures; without that the black tail
+  // panel is a wider gap than the screen and wins the peak.
+  const wLo = Math.floor(box.H * 0.04), wHi = Math.floor(box.H * 0.40);
+  let peak = wLo;
+  for (let i = wLo; i < wHi; i++) if (rowGap[i] > rowGap[peak]) peak = i;
+  const cut = 0.45 * rowGap[peak];
+  let bTop = peak, bBot = peak;
+  while (bTop > wLo && rowGap[bTop - 1] > cut) bTop--;
+  while (bBot < wHi - 1 && rowGap[bBot + 1] > cut) bBot++;
+  if (rowGap[peak] < 0.15) { bTop = -1; bBot = -1; }   // no backlight found at all
+  const at = (f) => (bTop < 0 ? null : rowGap[Math.round(bTop + f * (bBot - bTop))]);
+  const wTop = at(0.12), wBot = at(0.88);
+
   // THE LAMP CLUSTERS, NOT THE LAMP SEGMENTS. Our taillamps are ribbed, so the
   // red comes back as a dozen slats; the drawing's are ribbed too but its ribs
   // are thinner than a pixel at this size. Counting components would therefore
@@ -384,6 +453,17 @@ function rearLandmarks(src) {
     // number means more bodywork visible above the glass.
     roofAboveScreen: screen ? (screen.y0 - box.y0) / H : null,
     screenHeight: screen ? (screen.y1 - screen.y0 + 1) / H : null,
+    screenTopW: wTop,
+    screenBotW: wBot,
+    // POSITIVE MEANS IT WIDENS GOING DOWN, which every rear screen does a
+    // little. The drawing does it by 0.11 of the car's width. Ours did it by
+    // 0.45, and that is the upside-down T.
+    screenFlare: wTop === null || wBot === null ? null : wBot - wTop,
+    screenBand: bTop < 0 ? null : [bTop / H, bBot / H],
+    // The whole profile, printed, because a two-number summary of a shape is
+    // how the last one got away.
+    screenProfile: bTop < 0 ? null
+      : [0.05, 0.25, 0.45, 0.65, 0.85, 0.98].map((f) => rowGap[Math.round(bTop + f * (bBot - bTop))]),
     screenWidth: screen ? (screen.x1 - screen.x0 + 1) / box.W : null,
     // The upper of the two panels Anthony describes: screen bottom to lamp top.
     upperPanel: screen && clusters.length
@@ -565,6 +645,15 @@ line('    glass, as % of the car', rs.glassPct, os.glassPct, 2.0, (v) => v.toFix
 console.log(`\n  --- REAR ------------------------------------------------------------`);
 line('[3] rear screen height', rr.screenHeight, or_.screenHeight, 0.04);
 line('    rear screen width', rr.screenWidth, or_.screenWidth, 0.05);
+line('    screen width at its top', rr.screenTopW, or_.screenTopW, 0.06);
+line('    screen width at its bottom', rr.screenBotW, or_.screenBotW, 0.06);
+line('[6] screen flare, top to bottom', rr.screenFlare, or_.screenFlare, 0.08);
+if (rr.screenProfile && or_.screenProfile) {
+  console.log('      its width down the glass, as a fraction of the car\'s width:');
+  console.log('      down            0.05   0.25   0.45   0.65   0.85   0.98');
+  console.log('      drawing       ' + rr.screenProfile.map((v) => v.toFixed(3).padStart(7)).join(''));
+  console.log('      ours          ' + or_.screenProfile.map((v) => v.toFixed(3).padStart(7)).join(''));
+}
 line('[4] bodywork above the screen', rr.roofAboveScreen, or_.roofAboveScreen, 0.04);
 line('    panel between screen and lamps', rr.upperPanel, or_.upperPanel, 0.05);
 console.log(`  [5] taillamp clusters: drawing ${rr.lampCount}, ours ${or_.lampCount}`);
@@ -584,6 +673,8 @@ const drifts = [
   ['glass %', rs.glassPct / 100, small.glassPct / 100],
   ['screen height', rr.screenHeight, smallR.screenHeight],
   ['roof above screen', rr.roofAboveScreen, smallR.roofAboveScreen],
+  ['screen flare', rr.screenFlare, smallR.screenFlare],
+  ['screen width at top', rr.screenTopW, smallR.screenTopW],
   ['lamp aspect', rr.lampAspect / 4, smallR.lampAspect / 4],
 ];
 let worstDrift = 0, worstName = '';

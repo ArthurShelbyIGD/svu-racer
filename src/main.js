@@ -32,6 +32,7 @@ import {
 
 import { inkGroup, buildOutline, inkMaterial, pencilTexture, INK } from './art/toon.js';
 import { currentBody, bodyName } from './car/bodies.js';
+import { buildChaseHud } from './car/chasehud.js';
 import { buildFurniture } from './world/furniture.js';
 import { buildBarrier } from './world/barrier.js';
 import { buildTunnel } from './world/tunnel.js';
@@ -158,6 +159,9 @@ const SPEED_REF = 210;
 // change lasts exactly one frame and the measurement silently reads nothing.
 const tune = { si: 3, maxSpeed: SPEED_STEPS[3], driverX: 0, pitch: 1,
                showBody: true, showCockpit: true, freeze: false,
+               // The chase overlay, off-switchable the same way, so a harness
+               // can photograph the car without two dials in the corners.
+               showHud: true,
                // Chase camera, exposed so it can be SWEPT against the reference
                // rather than guessed at one rebuild per attempt.
                // THE CHASE CAMERA, SWEPT RATHER THAN NUDGED. See
@@ -170,6 +174,9 @@ const tune = { si: 3, maxSpeed: SPEED_STEPS[3], driverX: 0, pitch: 1,
                // speed, puts a fifth of the frame's width across it, and still
                // leaves the horizon a third of the way down.
                camY: 3.4, camZ: 10.5, aimY: -3.0,
+               // How much of the drawn road's heading the car adopts, and how
+               // much the steering adds on top. Swept by tools/cornering.mjs.
+               yawRoad: 0.90, yawSteer: 0.05,
                // STUDIO MODE. When set to {az, el, dist} the chase camera is
                // replaced by one orbiting the car, so a harness can photograph
                // it from the same angle as a reference drawing and compare the
@@ -2987,6 +2994,10 @@ const studioHidden = [];
 /** How far the chase camera's aim may be lifted by the road ahead. See the
  *  note at the lookAt. */
 const CHASE_RISE_CAP = 2.6;
+/** How far ahead, in segments, the car reads the road's heading from. Three is
+ *  about a car and a half — near enough that the car still looks planted, far
+ *  enough that a corner has visibly begun. */
+const YAW_LOOK = 3;
 const COCKPIT_STATE = { speed: 0, maxSpeed: 0, steer: 0, boosting: false, braking: false,
                         boostLeft: 1, rev: 0, gear: 0, gears: GEARS.length, race: null };
 
@@ -2994,6 +3005,17 @@ const car = new Group();
 car.add(bodyKit.group);
 car.add(cockpit.group);
 scene.add(car);
+
+// THE TWO INSTRUMENTS THIRD PERSON LOSES. Hung off the CAMERA rather than the
+// car, because they are furniture on the glass and not something in the world —
+// see the note at the top of chasehud.js. Hidden entirely in first person,
+// where the cockpit draws better versions of both.
+const chaseHud = buildChaseHud({ palette: PAL });
+camera.add(chaseHud.group);
+// A camera is not in the scene graph by default and its children are not
+// rendered unless it is. One line, and the whole overlay is invisible without
+// it — which looks exactly like the overlay being broken.
+scene.add(camera);
 
 // NO GROUND PLANE. It used to be here — one big quad at y=0 — and it was the
 // cause of two bugs at once: the road floated above it over crests, and it drew
@@ -3007,6 +3029,7 @@ const st = {
   x: 0,           // lateral position, road units
   steer: 0,       // -1..1, smoothed
   slope: 0,       // smoothed gradient under the car, for camera pitch
+  roadYaw: 0,     // smoothed heading of the DRAWN road ahead, radians, + = right
   // 1 is the driver's seat, 3 is the chase camera. THE PLAYER CHOOSES NOW —
   // the row in Settings is CHASE CAMERA and it survives a reload, because the
   // most common thing a tester does is reload and being put back in a view
@@ -3488,7 +3511,7 @@ window.addEventListener('mouseup', onMouse(false));
 window.addEventListener('keydown', (e) => {
   keys[e.code] = true;
   // KeyV kept for the harnesses, which still photograph the car from outside.
-  if (e.code === 'KeyV') st.view = st.view === 3 ? 1 : 3;
+  if (e.code === 'KeyV') setView(st.view === 3 ? 1 : 3);
 });
 window.addEventListener('keyup', (e) => { keys[e.code] = false; });
 
@@ -3585,6 +3608,13 @@ function applyFov(hFovDeg) {
   bind('gUp', () => { st.gear = clamp(st.gear + 1, 0, GEARS.length - 1); });
   bind('gDown', () => { st.gear = clamp(st.gear - 1, 0, GEARS.length - 1); });
   bind('gZero', () => recentreTilt());
+  // THE VIEW BUTTON IS BACK ON THE GLASS. It went into Settings first and
+  // Anthony drove with it for an evening: "I think I made a mistake putting
+  // 3rd/1st person in settings as I feel it would be cool to switch between
+  // the two when driving, certainly for a mainly 1st person driver." A camera
+  // you might want to flick to for one corner is not a preference, it is a
+  // control, and a control that costs a pause and four taps does not get used.
+  bind('gView', () => setView(st.view === 3 ? 1 : 3));
 }
 
 /**
@@ -4060,6 +4090,46 @@ function frame(now) {
   // differing across 724 columns between two supposedly identical captures.
   if (!tune.freeze) st.slope += (slopeNow - st.slope) * Math.min(1, dt * 7);
 
+  // WHICH WAY THE DRAWN ROAD IS GOING, so the car can point along it.
+  //
+  // Anthony, on the first drive with the chase camera back: "The front doesn't
+  // turn into the corner, if anything it looks like it is going the wrong way
+  // and the car slides sideways around a corner." Both halves of that were
+  // true, and they were two separate faults.
+  //
+  // THE CAR NEVER TURNED AT ALL. This is a projected racer: the car sits at the
+  // origin pointing down -Z for the whole race and the world bends around it,
+  // each segment drawn at an x offset accumulated from the curvature ahead. At
+  // the car's own position the road is therefore dead straight BY
+  // CONSTRUCTION, in the middle of the hardest corner on the lap — so there was
+  // never anything for a heading to be read from, and nothing noticed for as
+  // long as the only view was from inside the cabin.
+  //
+  // The eye does not read the tangent at a point, it reads the stretch it can
+  // see. Measured by tools/cornering.mjs on the hardest right on MIDNIGHT MILE:
+  // three segments ahead — about a car and a half — the drawn centreline is
+  // already 12.1 degrees off, and the car was sitting at 0.0.
+  //
+  // AND THE STEERING TERM POINTED THE WRONG WAY. `car.rotation.y = st.steer *
+  // 0.05`: st.steer is positive to the right, and a positive rotation about Y
+  // swings a nose that points down -Z toward -X, which is screen LEFT. So the
+  // one part of this that did move, moved into the outside of the corner. That
+  // is the "if anything it looks like it is going the wrong way".
+  //
+  // Smoothed, and frozen with everything else, for the reason above it: an
+  // unsmoothed read jumps a whole segment's worth of curvature every time
+  // `base` ticks over, fifty times a second at speed.
+  {
+    let dxr = 0, xr = 0;
+    for (let k = 0; k < YAW_LOOK; k++) {
+      dxr += track.curve[(base + k) % track.n] * SEG_LEN;
+      xr += dxr;
+    }
+    const want = Math.atan2(xr, YAW_LOOK * SEG_LEN);
+    if (!tune.freeze) st.roadYaw += (want - st.roadYaw) * Math.min(1, dt * 6);
+    else st.roadYaw = want;
+  }
+
   // Steering authority rises with speed, because a stationary car should not
   // slide sideways — but far from linearly, so the top end stays controllable.
   // Braking adds grip on top: brake INTO the corner and the car tucks in.
@@ -4229,7 +4299,11 @@ function frame(now) {
   car.position.set(0, 0, 0);
   car.rotation.x = Math.atan(st.slope) * tune.pitch;
   car.rotation.z = -st.steer * 0.07;
-  car.rotation.y = st.steer * 0.05;
+  // NEGATIVE, because +X is screen right and a positive rotation about Y takes
+  // a -Z nose the other way. Both terms: the road's own bend, and the driver's
+  // steering on top of it — so a car held on a wide line through a corner still
+  // points further in than one that is coasting round.
+  car.rotation.y = -(st.roadYaw * tune.yawRoad + st.steer * tune.yawSteer);
 
   // --- camera ---
   // THE CAMERA AIMS AT THE ROAD, NOT AT A FIXED POINT IN SPACE.
@@ -4305,6 +4379,17 @@ function frame(now) {
     const g = document.getElementById('gUp');
     if (g) g.classList.toggle('want', wantShift);
   }
+
+  // The chase overlay, and it reads the LIVE camera rather than the constants
+  // that set it: the field of view opens with speed here, and furniture parked
+  // at a fixed distance in front of a widening lens shrinks.
+  chaseHud.update({
+    show: st.view === 3 && tune.showHud,
+    fovY: camera.fov * Math.PI / 180,
+    aspect: camera.aspect,
+    braking,
+    boostLeft: st.boostLeft,
+  });
 
   cockpit.group.visible = st.view === 1 && tune.showCockpit;
   if (st.view === 1) {
@@ -4541,6 +4626,27 @@ requestAnimationFrame(frame);
 const VIEW_KEY = 'svu-racer-view';
 try { if (localStorage.getItem(VIEW_KEY) === '3') st.view = 3; } catch (e) { /* then first person */ }
 
+/**
+ * THE ONLY PLACE THE VIEW CHANGES, so the button's label, the stored choice
+ * and the camera cannot get out of step. There are three ways in now — the
+ * button on the glass, the V key, and whatever the menu is doing — and three
+ * callers each doing their own toggle-and-save is how one of them ends up
+ * saving and the other two not.
+ */
+function setView(v) {
+  st.view = v === 3 ? 3 : 1;
+  try { localStorage.setItem(VIEW_KEY, String(st.view)); } catch (e) { /* one-off */ }
+  const b = document.getElementById('gView');
+  if (b) {
+    b.textContent = st.view === 3 ? 'CHASE' : 'IN CAR';
+    b.classList.toggle('chase', st.view === 3);
+  }
+}
+
+// Paint the button's label from the stored choice before the first frame, or a
+// player who left it in chase mode gets a button that says IN CAR.
+setView(st.view);
+
 const menu = buildMenu({
   race: () => { firstGesture(); if (race.state !== 'countdown') startRace(); },
   read: () => ({
@@ -4582,10 +4688,7 @@ const menu = buildMenu({
     }
     else if (k === 'invert') { tilt.invert = !tilt.invert; recentreTilt(); }
     else if (k === 'readout') { document.body.classList.toggle('lean'); worst = 0; }
-    else if (k === 'chase') {
-      st.view = st.view === 3 ? 1 : 3;
-      try { localStorage.setItem(VIEW_KEY, String(st.view)); } catch (e) { /* one-off */ }
-    }
+    else if (k === 'chase') setView(st.view === 3 ? 1 : 3);
   },
   act: (k) => {
     if (k !== 'fullscreen') return;

@@ -58,7 +58,11 @@ async function load() {
   await page.evaluate(async () => {
     const R = window.RACER;
     R.menu.close();
-    for (const id of ['hud', 'note', 'ctl', 'gears']) {
+    // #gears STAYS UP: it holds the button under test, and hiding it measured
+    // a 0x0 rectangle and called the control too small to press. The frames
+    // below come off the WebGL buffer, which no DOM layer appears in, so
+    // leaving it visible costs the comparison nothing.
+    for (const id of ['hud', 'note', 'ctl']) {
       const e = document.getElementById(id);
       if (e) e.style.display = 'none';
     }
@@ -92,10 +96,19 @@ const differs = (a, b) => {
   return 100 * n / (a.length / 3);
 };
 
-/** Tap the row the way a player does: on the button, in the DOM. */
+/**
+ * Tap the button the way a player does: on the glass, mid-race.
+ *
+ * IT MOVED OUT OF SETTINGS. This harness used to reach into the Settings panel
+ * for `.sSw[data-k="chase"]`; the control is now #gView, one of the four
+ * buttons on the track, because Anthony found that a view you might want for a
+ * single corner is not something you pause and go three screens deep for.
+ * A harness that keeps testing the old location passes while the thing the
+ * player actually touches goes untested.
+ */
 const tapChase = () => page.evaluate(() => {
-  const b = document.querySelector('#sBody .sSw[data-k="chase"]');
-  if (!b) return 'no such row';
+  const b = document.getElementById('gView');
+  if (!b) return 'no such button';
   b.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
   return b.textContent.trim();
 });
@@ -103,8 +116,70 @@ const tapChase = () => page.evaluate(() => {
 console.log('\nCHASE CAMERA — the Settings row, and what it actually does\n');
 
 await load();
-const rowExists = await page.evaluate(() => !!document.querySelector('#sBody .sSw[data-k="chase"]'));
-ok(rowExists, 'the row is in Settings');
+const onGlass = await page.evaluate(() => {
+  const b = document.getElementById('gView');
+  if (!b) return null;
+  const r = b.getBoundingClientRect();
+  return { w: Math.round(r.width), h: Math.round(r.height), label: b.textContent.trim() };
+});
+ok(!!onGlass, 'the button is on the track, not in a menu');
+// A CONTROL YOU PRESS MID-CORNER HAS TO BE HITTABLE. 44px is the floor every
+// platform's guidance settles on and the gear buttons already meet it.
+ok(!!onGlass && onGlass.w >= 44 && onGlass.h >= 44, 'and it is big enough to hit',
+  onGlass ? `${onGlass.w}x${onGlass.h}px, reads "${onGlass.label}"` : '');
+ok(!!onGlass && /IN CAR|CHASE/.test(onGlass.label), 'and its label names the view you are in',
+  onGlass ? `"${onGlass.label}"` : '');
+
+// THE PANEL'S SHAPE, ASSERTED, because it broke silently the first time.
+//
+// Anthony asked for "two rows of two buttons. Gear up and down side by side,
+// centre and view side by side." Making that happen is one `display: grid` in
+// a stylesheet — and the edit that added it landed a paragraph of prose OUTSIDE
+// the comment above it, which took the whole rule with it. The buttons then
+// laid themselves out as plain inline blocks in a row across the top-left
+// corner of the screen, over the road, and the page threw no error and logged
+// nothing. A stylesheet cannot fail loudly; only a measurement can.
+const panel = await page.evaluate(() => {
+  const g = document.getElementById('gears');
+  if (!g) return null;
+  const vw = window.visualViewport ? window.visualViewport.width : window.innerWidth;
+  const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+  const kids = [...g.children].map((k) => {
+    const r = k.getBoundingClientRect();
+    return { id: k.id, x: Math.round(r.x), y: Math.round(r.y),
+             w: Math.round(r.width), h: Math.round(r.height) };
+  });
+  const r = g.getBoundingClientRect();
+  return { kids, vw, vh, box: { x: r.x, y: r.y, w: r.width, h: r.height } };
+});
+if (!panel) ok(false, 'the control panel exists');
+else {
+  const rows = [...new Set(panel.kids.map((k) => k.y))].sort((a, b) => a - b);
+  const cols = [...new Set(panel.kids.map((k) => k.x))].sort((a, b) => a - b);
+  ok(rows.length === 2 && cols.length === 2, 'the controls are two rows of two',
+    `${rows.length} rows, ${cols.length} columns: ` + panel.kids.map((k) => k.id).join(' '));
+  const row = (y) => panel.kids.filter((k) => k.y === y).sort((a, b) => a.x - b.x).map((k) => k.id);
+  ok(rows.length === 2 && row(rows[0]).join(',') === 'gUp,gDown',
+    'the gears share the top row', rows.length === 2 ? row(rows[0]).join(', ') : '');
+  ok(rows.length === 2 && row(rows[1]).join(',') === 'gZero,gView',
+    'centre and view share the one below', rows.length === 2 ? row(rows[1]).join(', ') : '');
+  // ON THE SCREEN, ALL OF IT. The panel is positioned from the visual viewport,
+  // and this is the check that would have caught the layout bug that outlived
+  // four attempts at the menu: a control that is off the edge on a device
+  // nobody here owns.
+  const inside = panel.box.x >= 0 && panel.box.y >= 0
+    && panel.box.x + panel.box.w <= panel.vw + 1
+    && panel.box.y + panel.box.h <= panel.vh + 1;
+  ok(inside, 'the whole panel is inside the viewport',
+    `${Math.round(panel.box.x)},${Math.round(panel.box.y)} ` +
+    `${Math.round(panel.box.w)}x${Math.round(panel.box.h)} of ${panel.vw}x${panel.vh}`);
+  // AND NOT ON TOP OF THE ROAD YOU ARE STEERING INTO. A fifth of the width is
+  // the most a control panel may cover; two columns of buttons on a small
+  // phone is exactly the change that could cross that line without anyone
+  // noticing until a tester says the corner came out of nowhere.
+  ok(panel.box.w <= panel.vw * 0.22, 'and it covers no more than a fifth of the width',
+    `${(100 * panel.box.w / panel.vw).toFixed(0)}%`);
+}
 
 const startView = await page.evaluate(() => window.RACER.st.view);
 ok(startView === 1, 'a fresh load starts in the driver\'s seat', `view ${startView}`);

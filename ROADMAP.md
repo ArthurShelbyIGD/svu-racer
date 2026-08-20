@@ -936,6 +936,103 @@ and tyre — an elevation's band cannot judge it.
 Everything else holds: 20 of 20 landmarks, silhouette 96.5 side and 96.4 rear,
 9,360 triangles, three draw calls, both tracks passing at 13 and 9.
 
+### 20 August, later: the car turns into the corner now
+
+Anthony, after the first drive with the chase camera on: *"There is also
+something wrong with how the car looks when cornering which could be a 3rd
+person killer. The front doesn't turn into the corner, if anything it looks like
+it is going the wrong way and the car slides sideways around a corner."*
+
+Two faults, and the second one is the reason the first was never noticed.
+
+**THE CAR NEVER TURNED AT ALL.** This is a projected racer in the Pole Position
+line: the car sits at the origin pointing down -Z for the whole race and the
+WORLD bends around it, each segment drawn at an x offset accumulated from the
+curvature ahead. At the car's own position the road is therefore dead straight
+BY CONSTRUCTION, in the middle of the hardest corner on the lap. Ask the engine
+which way the road points at the car and it says "straight ahead", always — so
+there was never anything for a heading to be read from.
+
+The eye does not read the tangent at a point, it reads the stretch it can see.
+`tools/cornering.mjs` measures the drawn centreline three segments ahead — about
+a car and a half — against the direction the car is actually facing:
+
+  MIDNIGHT MILE, hardest right    road 12.1 degrees      car 0.0
+  MIDNIGHT MILE, hardest left     road -12.6             car 0.0
+  THE DOCKS, hardest right        road 15.6              car 0.0
+
+**AND THE ONE TERM THAT DID MOVE, MOVED THE WRONG WAY.** `car.rotation.y =
+st.steer * 0.05`: st.steer is positive to the right, and a positive rotation
+about Y swings a nose that points down -Z toward -X, which is screen LEFT. So
+steering into a corner turned the car's nose out of it, by nearly three degrees
+at full lock. That is the "if anything it looks like it is going the wrong way",
+and it is a sign — the cheapest thing in the world to measure and the easiest to
+argue about.
+
+The car now reads the drawn road's own heading, smoothed and frozen with
+everything else, and adds the driver's steering on top: 10.9 against 12.1 on the
+hardest right, 14.0 against 15.6 on the Docks.
+
+**AND THE HARNESS WAS WRONG FIRST.** The first version of `cornering.mjs`
+negated both components of the car's forward vector, which is the BACKWARD
+direction, so it read every heading with its sign flipped — it called a car
+turned correctly into a right-hander "POINTING THE WRONG WAY", which is exactly
+the fault it had been written to detect. Two minutes from having the game
+changed to match a broken ruler. That is the fourth instrument this project has
+caught doing that and the reason nothing here is fixed before it is measured
+twice.
+
+### The controls, two by two
+
+*"I think I made a mistake putting 3rd/1st person in settings as I feel it would
+be cool to switch between the two when driving, certainly for a mainly 1st
+person driver... I'm thinking two rows of two buttons. Gear up and down side by
+side, centre and view side by side."*
+
+His layout, and it is the right one: the two you press constantly share a row.
+VIEW is out of Settings entirely and on the glass next to CENTRE, its label
+naming the view you are in — IN CAR or CHASE — on the same rule as SOUND ON.
+One `setView()` now owns the button, the V key and the stored choice, because
+three callers each doing their own toggle-and-save is how one of them ends up
+not saving.
+
+**The CSS edit that made it a grid broke silently first**, and this is worth
+recording. A paragraph of prose landed OUTSIDE the comment above the rule, which
+took the whole `#gears` block with it; the four buttons laid themselves out as
+plain inline blocks across the top-left corner, over the road, and the page
+threw no error and logged nothing. A stylesheet cannot fail loudly. So
+`tools/viewswitch.mjs` now asserts the SHAPE — two rows of two, the gears on
+top, the whole panel inside the viewport and under a fifth of its width — and
+those assertions have a negative control that cost nothing to obtain, because
+the bug they catch is the bug that produced them.
+
+### Two instruments for the chase view
+
+*"3rd person needs the brake pedal and a nitrous dial."* Those two and not the
+others, which is the right call: speed and gear are readable from the world and
+the engine note, but "am I braking" and "how much is left in the bottle" have no
+other tell — and the bottle especially, given his own technique is "let it
+nearly empty, then nearly full, rinse and repeat". That is a plan you cannot
+execute without a gauge.
+
+`src/car/chasehud.js`: its own procedural atlas, one material, three quads,
+hung off the camera. Not DOM — the pedal hints were divs once and were replaced
+precisely because they were "the only thing in the frame that looked like a web
+page". Not the cockpit's own quads either: those are merged into the dashboard
+geometry and positioned by where the driver's eye is.
+
+The awkward part is that the field of view opens with speed, so furniture parked
+at a fixed distance in front of a widening lens shrinks — a gauge that gets
+smaller the faster you go vanishes exactly when it is being read. So the overlay
+is re-placed every frame from the LIVE camera rather than from the constants
+that set it.
+
+**And it cost two draw calls before it cost one.** A transparent DoubleSide
+material is two draws in three.js — back faces then front — for three quads that
+face the lens and can never be seen from behind. Measured, not assumed: 15 calls
+with DoubleSide, 14 with FrontSide, against a budget of 16. Worst moment is now
+14 on MIDNIGHT MILE and 10 on THE DOCKS.
+
 ## 4. Points and credits
 
 Earned by playing, in readiness for the garage. Bonuses for:

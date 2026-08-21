@@ -501,12 +501,10 @@
      still quieter than the gears, because it is a rescue rather than something
      you press every few seconds. */
   #gZero, #gView { font-size: max(9px, 2vmin); min-height: max(44px, 7.5vmin); opacity: 0.8; }
-  /* THE VIEW BUTTON SAYS WHICH VIEW YOU ARE IN, not which one you would get.
-     Same rule as SOUND ON, and the same reason: a label that names the action
-     leaves the player with no way to tell, at a glance mid-corner, which one
-     they are looking at — which for a camera is the one thing they can already
-     see and would like confirmed rather than contradicted. */
-  #gView.chase { border-color: #8ee23f; }
+  /* NO STATE COLOUR ON VIEW EITHER. A green border is what GEAR + wears when
+     the tacho is saying "shift now" — an instruction. Wearing the same green
+     to mean "you are in chase" would be the one signal in the game saying two
+     different things. */
 </style>
 </head>
 <body class="lean">
@@ -527,9 +525,26 @@
 <!-- THE GEARS. Two buttons, their own layer, nothing to do with the dev panel
      that used to hold them. See the #gears rules for why they came back. -->
 <div id="gears">
-  <button id="gUp">GEAR &plus;</button>
+  <!-- MINUS ON THE LEFT, PLUS ON THE RIGHT. Anthony: "The gear buttons are the
+       wrong way around I feel, + should be on the right and - on the left."
+       He is right, and it is not only preference: every dial, slider and volume
+       control on a phone runs low-on-the-left, so a thumb reaching right for
+       "more" is reaching the way it has been trained everywhere else. The grid
+       places these in DOM order, so the order here is the order on the glass —
+       and gUp keeps its id and its shift-now lamp wherever it sits. -->
   <button id="gDown">GEAR &minus;</button>
-  <!-- CENTRE and VIEW share the second row. VIEW's label is the state. -->
+  <button id="gUp">GEAR &plus;</button>
+  <!-- CENTRE and VIEW share the second row.
+
+       AND VIEW JUST SAYS VIEW. It said IN CAR / CHASE at first, on the same
+       label-is-the-state rule as SOUND ON — but Anthony: "the view button
+       should show 'view' as the text and just toggle the view without a change
+       of text. It's a more logical word than 'chase' imo." The rule was the
+       wrong one to borrow. SOUND ON has to name its state because a muted game
+       and a quiet moment look identical; which camera you are in is the single
+       most visible fact on the screen. A caption for it is a label arguing with
+       the picture, and one that changes under your thumb is one you have to
+       re-read mid-corner. -->
   <!-- RE-ZERO THE TILT, AND IT HAS TO BE HERE RATHER THAN IN SETTINGS.
        Tilt steering measures from a neutral captured earlier; hold the phone
        differently — reaching for a button, shifting in a seat, leaning into a
@@ -547,7 +562,7 @@
        control that proves it is reading the steering. Which is what pointed
        at the zero instead. -->
   <button id="gZero">CENTRE</button>
-  <button id="gView">IN CAR</button>
+  <button id="gView">VIEW</button>
 </div>
 
 <div id="note">tilt to steer · corners are brake and boost · right edge shifts · CENTRE re-zeros the tilt</div>

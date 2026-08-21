@@ -1006,6 +1006,35 @@ top, the whole panel inside the viewport and under a fifth of its width — and
 those assertions have a negative control that cost nothing to obtain, because
 the bug they catch is the bug that produced them.
 
+### The two small ones, and why the label rule did not transfer
+
+*"The gear buttons are the wrong way around I feel, + should be on the right and
+- on the left."* Right, and not only as preference: every dial, slider and
+volume control on the phone runs low-on-the-left, so a thumb reaching right for
+"more" is reaching the way it has already been trained. The grid places buttons
+in DOM order, so the swap is the two lines in the template; gUp keeps its id and
+its shift-now lamp wherever it sits. `tools/viewswitch.mjs` asserts the ORDER
+now and not just the pairing — an assertion that only checked "the gears are on
+the top row" would pass just as happily with them back to front, which is the
+state he asked to leave.
+
+*"The view button should show 'view' as the text and just toggle the view
+without a change of text. It's a more logical word than 'chase' imo."*
+
+It said IN CAR / CHASE for one evening, borrowed from SOUND ON — label-is-the-
+state, which has earned its place on that button. The borrow was wrong and it is
+worth writing down why, because the rule looks general and is not. SOUND ON has
+to name its state because a muted game and a quiet moment look identical: the
+label is the only evidence there is. Which camera you are in is the single most
+visible fact on the screen. A caption for it is a label arguing with the
+picture, and one that rewrites itself under the thumb is one that has to be
+re-read mid-corner to be sure which way it just went. The harness now asserts
+that the label does NOT change when the button is pressed.
+
+The green state border went with it. Green on a button in this game means the
+tacho is saying "shift now" — an instruction. The same green meaning "you are in
+chase" would be the one signal in the game saying two different things.
+
 ### Two instruments for the chase view
 
 *"3rd person needs the brake pedal and a nitrous dial."* Those two and not the

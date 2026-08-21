@@ -501,12 +501,10 @@
      still quieter than the gears, because it is a rescue rather than something
      you press every few seconds. */
   #gZero, #gView { font-size: max(9px, 2vmin); min-height: max(44px, 7.5vmin); opacity: 0.8; }
-  /* THE VIEW BUTTON SAYS WHICH VIEW YOU ARE IN, not which one you would get.
-     Same rule as SOUND ON, and the same reason: a label that names the action
-     leaves the player with no way to tell, at a glance mid-corner, which one
-     they are looking at — which for a camera is the one thing they can already
-     see and would like confirmed rather than contradicted. */
-  #gView.chase { border-color: #8ee23f; }
+  /* NO STATE COLOUR ON VIEW EITHER. A green border is what GEAR + wears when
+     the tacho is saying "shift now" — an instruction. Wearing the same green
+     to mean "you are in chase" would be the one signal in the game saying two
+     different things. */
 </style>
 </head>
 <body class="lean">
@@ -527,9 +525,26 @@
 <!-- THE GEARS. Two buttons, their own layer, nothing to do with the dev panel
      that used to hold them. See the #gears rules for why they came back. -->
 <div id="gears">
-  <button id="gUp">GEAR &plus;</button>
+  <!-- MINUS ON THE LEFT, PLUS ON THE RIGHT. Anthony: "The gear buttons are the
+       wrong way around I feel, + should be on the right and - on the left."
+       He is right, and it is not only preference: every dial, slider and volume
+       control on a phone runs low-on-the-left, so a thumb reaching right for
+       "more" is reaching the way it has been trained everywhere else. The grid
+       places these in DOM order, so the order here is the order on the glass —
+       and gUp keeps its id and its shift-now lamp wherever it sits. -->
   <button id="gDown">GEAR &minus;</button>
-  <!-- CENTRE and VIEW share the second row. VIEW's label is the state. -->
+  <button id="gUp">GEAR &plus;</button>
+  <!-- CENTRE and VIEW share the second row.
+
+       AND VIEW JUST SAYS VIEW. It said IN CAR / CHASE at first, on the same
+       label-is-the-state rule as SOUND ON — but Anthony: "the view button
+       should show 'view' as the text and just toggle the view without a change
+       of text. It's a more logical word than 'chase' imo." The rule was the
+       wrong one to borrow. SOUND ON has to name its state because a muted game
+       and a quiet moment look identical; which camera you are in is the single
+       most visible fact on the screen. A caption for it is a label arguing with
+       the picture, and one that changes under your thumb is one you have to
+       re-read mid-corner. -->
   <!-- RE-ZERO THE TILT, AND IT HAS TO BE HERE RATHER THAN IN SETTINGS.
        Tilt steering measures from a neutral captured earlier; hold the phone
        differently — reaching for a button, shifting in a seat, leaning into a
@@ -547,7 +562,7 @@
        control that proves it is reading the steering. Which is what pointed
        at the zero instead. -->
   <button id="gZero">CENTRE</button>
-  <button id="gView">IN CAR</button>
+  <button id="gView">VIEW</button>
 </div>
 
 <div id="note">tilt to steer · corners are brake and boost · right edge shifts · CENTRE re-zeros the tilt</div>
@@ -685,7 +700,7 @@
     webgl: p.webgl, renderer: p.renderer, vendor: p.vendor, maxTex: p.maxTex,
     screen: (screen.width | 0) + 'x' + (screen.height | 0),
     dpr: Math.round((window.devicePixelRatio || 1) * 100) / 100,
-    ua: navigator.userAgent, build: '757f7098 2026-08-20 20:27'
+    ua: navigator.userAgent, build: '76b581c0 2026-08-21 09:15'
   };
 
   var shown = false;
@@ -4701,7 +4716,7 @@ pixel ratio ${ii.getPixelRatio().toFixed(2)} of ${(window.devicePixelRatio||1).t
 canvas      ${ii.domElement.width}x${ii.domElement.height}`,q3.textContent=`build       ${lr.build}
 WebGL       ${lr.webgl}   maxtex ${lr.maxTex}
 screen      ${lr.screen} at dpr ${lr.dpr}
-`+qp("GPU",lr.renderer)+qp("vendor",lr.vendor)+qp("browser",X3(lr.ua)).replace(/\n$/,""),ps=0,Nu=0,Ou=0}}requestAnimationFrame(Ix);var Px="svu-racer-view";try{localStorage.getItem(Px)==="3"&&(rt.view=3)}catch{}function Vu(n){rt.view=n===3?3:1;try{localStorage.setItem(Px,String(rt.view))}catch{}let t=document.getElementById("gView");t&&(t.textContent=rt.view===3?"CHASE":"IN CAR",t.classList.toggle("chase",rt.view===3))}Vu(rt.view);var Rc=Yv({race:()=>{ya(),qt.state!=="countdown"&&ku()},read:()=>({best:qt.best,bestTop:qt.bestTop==null?null:qt.bestTop*Qr,sound:!ni.muted,tilt:oe.enabled,invert:oe.invert,readout:!document.body.classList.contains("lean"),chase:rt.view===3,pixels:ma[Us].toFixed(2)+"x",cap:yi[_n]===1?"none":Math.round(pa/yi[_n])+" fps",scenery:Mi.want===0?"off":String(Mi.want),fsState:/not supported|unsupported/i.test(xi.state)?"unsupported":xi.state,fullscreen:xi.state==="fullscreen"?"on":/refused/i.test(xi.state)?"refused":"off",tiltPerm:oe.perm,tiltOk:oe.ok}),toggle:n=>{n==="sound"?ni.setMuted(!ni.muted):n==="tilt"?(oe.enabled=!oe.enabled,oe.enabled?(Ec(),Ex()):oe.on=!1):n==="invert"?(oe.invert=!oe.invert,Ec()):n==="readout"?(document.body.classList.toggle("lean"),ps=0):n==="chase"&&Vu(rt.view===3?1:3)},act:n=>{n==="fullscreen"&&(xi.state==="fullscreen"?oR():(Ic(),Cc()))},step:(n,t)=>{if(n==="pixels")Us=En(Us+t,0,ma.length-1),t0();else if(n==="cap")_n=En(_n-t,0,yi.length-1),ga=0,ps=0;else if(n==="scenery"){let e=Mi.want,i=t>0?e===0?100:e*2:Math.floor(e/2);Mi.count=i<25?0:i}}});window.RACER={st:rt,renderer:ii,scene:Je,camera:Sn,median:Cx,handling:da,tune:ce,tilt:oe,pedal:jr,wake:Qi,fs:xi,track:le,bodyKit:Sc,cockpit:fa,scenery:Mi,furniture:mx,gantry:gx,PROF:hs,bodyName:Wd,barrier:fx,tunnel:e0,cranes:vx,menu:Rc,bridge:{BRIDGE:Cs,lipDist:_1,gapWidth:G1,inGap:n=>ac(le,n,Le)},sites:ds,docks:ds?{DOCKS:lc,inGap:n=>ac(le,n,Le)}:null,pace:{divisors:yi,get panelHz(){return pa},get i(){return _n},set i(n){_n=En(n,0,yi.length-1),ga=0},get drawn(){return Nu},get simmed(){return Ou}},race:qt,startRace:ku,audio:ni,consts:{ROAD_W:se,STEER_RATE:Tc,BRAKE_GRIP:r0,CORNER_AUTHORITY:hx,SPEED_STEPS:s0,SEG_LEN:Le,STRAY_MAX:Qp,GEARS:si,REDLINE:ax,MPH:Qr,RACE_FROM:va,RACE_LEN:xa,COUNTDOWN:Gu,PEDAL_TOP:Mc,PEDAL_W:Ac,BOOST_DRAIN:Mx,BOOST_REFILL:Ax,BOOST_ARM:bx,BOOST_TOP:cx,GRAVITY:bc,CRASH_HOLD:px}};})();
+`+qp("GPU",lr.renderer)+qp("vendor",lr.vendor)+qp("browser",X3(lr.ua)).replace(/\n$/,""),ps=0,Nu=0,Ou=0}}requestAnimationFrame(Ix);var Px="svu-racer-view";try{localStorage.getItem(Px)==="3"&&(rt.view=3)}catch{}function Vu(n){rt.view=n===3?3:1;try{localStorage.setItem(Px,String(rt.view))}catch{}}Vu(rt.view);var Rc=Yv({race:()=>{ya(),qt.state!=="countdown"&&ku()},read:()=>({best:qt.best,bestTop:qt.bestTop==null?null:qt.bestTop*Qr,sound:!ni.muted,tilt:oe.enabled,invert:oe.invert,readout:!document.body.classList.contains("lean"),chase:rt.view===3,pixels:ma[Us].toFixed(2)+"x",cap:yi[_n]===1?"none":Math.round(pa/yi[_n])+" fps",scenery:Mi.want===0?"off":String(Mi.want),fsState:/not supported|unsupported/i.test(xi.state)?"unsupported":xi.state,fullscreen:xi.state==="fullscreen"?"on":/refused/i.test(xi.state)?"refused":"off",tiltPerm:oe.perm,tiltOk:oe.ok}),toggle:n=>{n==="sound"?ni.setMuted(!ni.muted):n==="tilt"?(oe.enabled=!oe.enabled,oe.enabled?(Ec(),Ex()):oe.on=!1):n==="invert"?(oe.invert=!oe.invert,Ec()):n==="readout"?(document.body.classList.toggle("lean"),ps=0):n==="chase"&&Vu(rt.view===3?1:3)},act:n=>{n==="fullscreen"&&(xi.state==="fullscreen"?oR():(Ic(),Cc()))},step:(n,t)=>{if(n==="pixels")Us=En(Us+t,0,ma.length-1),t0();else if(n==="cap")_n=En(_n-t,0,yi.length-1),ga=0,ps=0;else if(n==="scenery"){let e=Mi.want,i=t>0?e===0?100:e*2:Math.floor(e/2);Mi.count=i<25?0:i}}});window.RACER={st:rt,renderer:ii,scene:Je,camera:Sn,median:Cx,handling:da,tune:ce,tilt:oe,pedal:jr,wake:Qi,fs:xi,track:le,bodyKit:Sc,cockpit:fa,scenery:Mi,furniture:mx,gantry:gx,PROF:hs,bodyName:Wd,barrier:fx,tunnel:e0,cranes:vx,menu:Rc,bridge:{BRIDGE:Cs,lipDist:_1,gapWidth:G1,inGap:n=>ac(le,n,Le)},sites:ds,docks:ds?{DOCKS:lc,inGap:n=>ac(le,n,Le)}:null,pace:{divisors:yi,get panelHz(){return pa},get i(){return _n},set i(n){_n=En(n,0,yi.length-1),ga=0},get drawn(){return Nu},get simmed(){return Ou}},race:qt,startRace:ku,audio:ni,consts:{ROAD_W:se,STEER_RATE:Tc,BRAKE_GRIP:r0,CORNER_AUTHORITY:hx,SPEED_STEPS:s0,SEG_LEN:Le,STRAY_MAX:Qp,GEARS:si,REDLINE:ax,MPH:Qr,RACE_FROM:va,RACE_LEN:xa,COUNTDOWN:Gu,PEDAL_TOP:Mc,PEDAL_W:Ac,BOOST_DRAIN:Mx,BOOST_REFILL:Ax,BOOST_ARM:bx,BOOST_TOP:cx,GRAVITY:bc,CRASH_HOLD:px}};})();
 
 </script>
 </body>

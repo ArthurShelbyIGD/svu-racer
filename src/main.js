@@ -4636,11 +4636,11 @@ try { if (localStorage.getItem(VIEW_KEY) === '3') st.view = 3; } catch (e) { /* 
 function setView(v) {
   st.view = v === 3 ? 3 : 1;
   try { localStorage.setItem(VIEW_KEY, String(st.view)); } catch (e) { /* one-off */ }
-  const b = document.getElementById('gView');
-  if (b) {
-    b.textContent = st.view === 3 ? 'CHASE' : 'IN CAR';
-    b.classList.toggle('chase', st.view === 3);
-  }
+  // THE BUTTON'S LABEL DOES NOT MOVE. It read IN CAR / CHASE for one evening
+  // and Anthony asked for the plain word instead: which camera you are in is
+  // the most visible fact on the screen, so a caption for it is a label
+  // arguing with the picture, and one that changes under your thumb is one you
+  // have to re-read mid-corner. See the note in the template.
 }
 
 // Paint the button's label from the stored choice before the first frame, or a

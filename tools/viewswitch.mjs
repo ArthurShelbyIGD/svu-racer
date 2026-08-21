@@ -127,7 +127,7 @@ ok(!!onGlass, 'the button is on the track, not in a menu');
 // platform's guidance settles on and the gear buttons already meet it.
 ok(!!onGlass && onGlass.w >= 44 && onGlass.h >= 44, 'and it is big enough to hit',
   onGlass ? `${onGlass.w}x${onGlass.h}px, reads "${onGlass.label}"` : '');
-ok(!!onGlass && /IN CAR|CHASE/.test(onGlass.label), 'and its label names the view you are in',
+ok(!!onGlass && onGlass.label === 'VIEW', 'and it is labelled VIEW',
   onGlass ? `"${onGlass.label}"` : '');
 
 // THE PANEL'S SHAPE, ASSERTED, because it broke silently the first time.
@@ -159,8 +159,15 @@ else {
   ok(rows.length === 2 && cols.length === 2, 'the controls are two rows of two',
     `${rows.length} rows, ${cols.length} columns: ` + panel.kids.map((k) => k.id).join(' '));
   const row = (y) => panel.kids.filter((k) => k.y === y).sort((a, b) => a.x - b.x).map((k) => k.id);
-  ok(rows.length === 2 && row(rows[0]).join(',') === 'gUp,gDown',
-    'the gears share the top row', rows.length === 2 ? row(rows[0]).join(', ') : '');
+  // MINUS LEFT, PLUS RIGHT, and the order is asserted rather than just the
+  // pairing. Anthony had them the other way round for an evening and asked for
+  // the swap — "+ should be on the right and - on the left" — which is the way
+  // every volume slider and dial on the phone already runs. An assertion that
+  // only checked "the gears are on the top row" would pass just as happily
+  // with them back to front, which is the state he asked to leave.
+  ok(rows.length === 2 && row(rows[0]).join(',') === 'gDown,gUp',
+    'the gears share the top row, minus on the left',
+    rows.length === 2 ? row(rows[0]).join(', ') : '');
   ok(rows.length === 2 && row(rows[1]).join(',') === 'gZero,gView',
     'centre and view share the one below', rows.length === 2 ? row(rows[1]).join(', ') : '');
   // ON THE SCREEN, ALL OF IT. The panel is positioned from the visual viewport,
@@ -195,7 +202,11 @@ const label = await tapChase();
 const chaseView = await page.evaluate(() => window.RACER.st.view);
 const b1 = await frame();
 const moved = differs(a2, b1);
-ok(chaseView === 3, 'the row switches the view', `view ${chaseView}, button reads "${label}"`);
+ok(chaseView === 3, 'the button switches the view', `view ${chaseView}`);
+// AND THE LABEL HOLDS STILL. It used to rewrite itself to CHASE, and a caption
+// that changes under the thumb is one the player has to re-read mid-corner —
+// for a fact, which camera they are in, that the screen is already shouting.
+ok(label === 'VIEW', 'and its label does not change under the thumb', `reads "${label}"`);
 ok(moved > still * 10 && moved > 20, 'and the CAMERA moves, not just the flag',
   `${moved.toFixed(1)}% of the frame changed, against ${still.toFixed(2)}% for doing nothing`);
 
